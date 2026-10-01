@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>展場收銀 POS</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: { extend: { fontFamily: { sans: ['"Plus Jakarta Sans"', '"Noto Sans TC"', 'sans-serif'] } } }
+        }
+    </script>
+
+    <style>
+        * { -webkit-tap-highlight-color: transparent; user-select: none; }
+        input, textarea { user-select: auto; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 9999px; }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+    </style>
+</head>
+
+<body class="bg-slate-50 text-slate-800 h-screen w-screen overflow-hidden flex flex-col font-sans">
+
+    <!-- 頂部 -->
+    <header class="h-16 bg-white border-b border-slate-200 px-5 flex items-center justify-between flex-shrink-0 z-10 gap-3">
+        <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 flex-shrink-0">
+                <i data-lucide="store" class="w-5 h-5"></i>
+            </div>
+            <div class="min-w-0">
+                <h1 class="font-bold text-slate-900 text-lg leading-tight tracking-tight">活動快閃 POS</h1>
+                <div class="flex items-center space-x-2 text-xs text-slate-400">
+                    <span id="syncStatusIndicator" class="inline-block w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                    <span id="syncStatusText" class="truncate">雲端試算表已連線</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2 flex-shrink-0">
+            <button onclick="openSopModal()" class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 rounded-lg text-xs font-bold transition active:scale-95 border border-amber-300">
+                <i data-lucide="book-open-text" class="w-4 h-4 text-amber-600"></i><span>SOP</span>
+            </button>
+            <button onclick="openOrdersModal()" class="relative flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition active:scale-95">
+                <i data-lucide="receipt-text" class="w-3.5 h-3.5"></i><span>訂單紀錄</span>
+                <span id="unsyncedBadge" class="hidden absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center"></span>
+            </button>
+            <button id="shiftBtn" onclick="openShiftModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition active:scale-95"></button>
+            <button id="refreshBtn" onclick="manualRefresh()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition active:scale-95 disabled:opacity-50 disabled:pointer-events-none">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>重整</span>
+            </button>
+            <button onclick="openSettingsModal()" class="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 transition">
+                <i data-lucide="settings" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 flex overflow-hidden">
+        <!-- 左：商品 / 預購 -->
+        <section class="flex-1 flex flex-col min-w-0 bg-slate-50">
+            <div class="p-4 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-4">
+                <div id="categoryContainer" class="flex items-center gap-2 overflow-x-auto pb-1 min-w-0"></div>
+                <div class="relative w-64 flex-shrink-0">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="text" id="searchInput" placeholder="搜尋商品名稱或編號..." oninput="handleSearch()"
+                           class="w-full bg-slate-100 border-none rounded-xl pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition" />
+                </div>
+            </div>
+            <div id="preorderHint" class="hidden px-5 pt-4 -mb-1">
+                <div class="flex items-center gap-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    <i data-lucide="id-card" class="w-4 h-4 text-amber-600 flex-shrink-0"></i>
+                    <span>請客人<strong>報姓名＋電話末三碼</strong>，右上搜尋框可直接輸入末三碼。點卡片核對後交貨。</span>
+                </div>
+            </div>
+            <div id="productsGrid" class="flex-1 overflow-y-auto p-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 content-start auto-rows-max"></div>
+        </section>
+
+        <!-- 右：購物車 -->
+        <aside class="w-[380px] xl:w-[420px] bg-white border-l border-slate-200 flex flex-col flex-shrink-0 shadow-lg">
+            <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                    <h2 class="font-bold text-slate-900 text-lg">目前訂單</h2>
+                    <p class="text-xs text-slate-400 mt-0.5">點擊品項調整數量，自動套用組合特價</p>
+                </div>
+                <button onclick="clearCart()" class="text-xs font-semibold text-rose-500 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50 transition">清空</button>
+            </div>
+
+            <div id="cartList" class="flex-1 overflow-y-auto p-4 space-y-2.5"></div>
+
+            <div class="p-4 border-t border-slate-100 bg-slate-50/70 space-y-3">
+                <div class="bg-white p-3 rounded-xl border border-slate-200">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-xs font-bold">券</span>
+                            <span class="text-xs font-bold text-slate-700">折價券 (NT$ 5 / 張)</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="changeCouponCount(-1)" class="w-6 h-6 flex items-center justify-center rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-95"><i data-lucide="minus" class="w-3 h-3"></i></button>
+                            <span id="couponCountDisplay" class="w-8 text-center text-xs font-bold text-slate-900">0 張</span>
+                            <button onclick="changeCouponCount(1)" class="w-6 h-6 flex items-center justify-center rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-95"><i data-lucide="plus" class="w-3 h-3"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5 text-xs text-slate-600">
+                    <div class="flex justify-between"><span>品項數量</span><span id="cartCountSummary" class="font-medium">0 件</span></div>
+                    <div class="flex justify-between"><span>商品小計</span><span>NT$ <span id="cartSubtotal">0</span></span></div>
+                    <div class="flex justify-between text-emerald-600 font-semibold"><span>組合特價折扣</span><span>- NT$ <span id="specialDiscountTotal">0</span></span></div>
+                    <div class="flex justify-between text-rose-500 font-semibold"><span>折價券折抵</span><span>- NT$ <span id="couponDiscountTotal">0</span></span></div>
+                    <div class="flex justify-between items-baseline pt-2 border-t border-slate-200">
+                        <span class="text-sm font-semibold text-slate-800">應收總額</span>
+                        <span class="text-2xl font-black text-slate-900 tracking-tight">NT$ <span id="cartTotal">0</span></span>
+                    </div>
+                </div>
+
+                <button id="checkoutBtn" onclick="handleCheckout()" disabled
+                        class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-lg shadow-blue-500/25 active:scale-[0.98] transition flex items-center justify-center gap-2 text-base">
+                    <i data-lucide="check-circle-2" class="w-5 h-5"></i><span>確認結帳 (現金收銀)</span>
+                </button>
+            </div>
+        </aside>
+    </main>
+
+    <!-- 提示列 -->
+    <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white rounded-2xl shadow-2xl pl-4 pr-3 py-3 flex items-center gap-3 text-sm">
+        <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400 flex-shrink-0"></i>
+        <span id="toastText" class="font-semibold"></span>
+        <div id="toastActions" class="flex items-center gap-1.5"></div>
+        <button onclick="hideToast()" class="text-slate-400 hover:text-white ml-1"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+
+    <!-- 訂單紀錄 -->
+    <div id="ordersModal" class="fixed inset-0 bg-slate-900/50 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-start gap-4">
+                <div>
+                    <h3 class="font-bold text-slate-900 text-base">訂單紀錄</h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">僅供查詢。作廢請在結帳後、下方提示列出現時按「作廢」；退換貨請寫在交班備註並 LINE 回報。</p>
+                </div>
+                <button onclick="closeOrdersModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap">
+                <div class="flex bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">
+                    <button id="ordersTabToday" onclick="setOrdersScope('today')" class="px-3 py-1 rounded-md">今天</button>
+                    <button id="ordersTabAll" onclick="setOrdersScope('all')" class="px-3 py-1 rounded-md">全部</button>
+                </div>
+                <div class="relative flex-1 min-w-[160px]">
+                    <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input id="ordersSearch" oninput="renderOrders()" placeholder="單號、品名、預購姓名…" class="w-full bg-slate-100 rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <button id="resyncBtn" onclick="flushQueue()" class="hidden px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-xs font-bold hover:bg-rose-100 disabled:opacity-60 disabled:pointer-events-none"></button>
+            </div>
+            <div id="ordersList" class="p-4 overflow-y-auto space-y-2.5 flex-1"></div>
+            <div class="px-6 py-3 bg-slate-50 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
+                <span id="ordersSummary"></span>
+                <button onclick="closeOrdersModal()" class="px-4 py-2 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 共用彈窗（退貨 / 換貨 / 預購取貨 / 交班） -->
+    <div id="dynModal" class="fixed inset-0 bg-slate-900/60 hidden z-[60] flex items-center justify-center p-4">
+        <div id="dynModalBox" class="bg-white rounded-2xl w-full max-w-xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"></div>
+    </div>
+
+    <!-- SOP -->
+    <div id="sopModal" class="fixed inset-0 bg-slate-900/50 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+            <div class="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="clipboard-list" class="w-5 h-5 text-amber-400"></i>
+                    <h3 class="font-bold text-base">展場人員顧展與服務 SOP</h3>
+                </div>
+                <button onclick="closeSopModal()" class="text-slate-400 hover:text-white transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="p-6 overflow-y-auto space-y-6 text-sm text-slate-700 leading-relaxed">
+                <section class="bg-blue-50/70 border border-blue-200 rounded-xl p-4">
+                    <h4 class="font-bold text-blue-900 mb-2 flex items-center gap-1.5 text-sm"><i data-lucide="sparkles" class="w-4 h-4 text-blue-600"></i><span>現場優惠快速記憶</span></h4>
+                    <ul class="list-disc list-inside space-y-1 text-xs text-blue-800">
+                        <li><strong>貼紙（小張）</strong>：單張 $10，<strong>每滿 6 張特價 $50</strong>（POS 自動扣折）。</li>
+                        <li><strong>明信片</strong>：單張 $35，<strong>每滿 3 張特價 $100</strong>（POS 自動扣折）。</li>
+                        <li><strong>折價券</strong>：持 5 元折價券結帳，請在右側折價券處手動點擊 <code>+</code>。</li>
+                    </ul>
+                </section>
+
+                <section class="space-y-2">
+                    <h4 class="font-bold text-slate-900 flex items-center gap-1.5 text-base border-b pb-1"><i data-lucide="wallet" class="w-4 h-4 text-slate-600"></i><span>開班・交班・收攤（只要點錢）</span></h4>
+                    <ol class="list-decimal list-inside space-y-1.5 text-xs text-slate-600">
+                        <li><strong>開班</strong>：當天第一班按右上「開班點收」，輸入各面額張數與姓名。</li>
+                        <li><strong>交班</strong>：換人時按「交班」，<strong>兩位志工一起</strong>點錢、輸入各面額張數，系統會自動算出應有現金並顯示「相符」或「短少」。</li>
+                        <li>填接班志工姓名，接班志工確認金額後勾選，按「送出交班」。</li>
+                        <li><strong>收攤</strong>：最後一班選「今日收攤」，現金交給負責人。</li>
+                        <li><strong>現金不符</strong>時，備註一定要寫原因才能送出；本班有<strong>退換貨</strong>也請寫在備註並 LINE 回報。</li>
+                    </ol>
+                </section>
+
+                <section class="space-y-2">
+                    <h4 class="font-bold text-slate-900 flex items-center gap-1.5 text-base border-b pb-1"><i data-lucide="package-check" class="w-4 h-4 text-slate-600"></i><span>預購取貨</span></h4>
+                    <ol class="list-decimal list-inside space-y-1.5 text-xs text-slate-600">
+                        <li>商品分類點「<strong>預購取貨</strong>」，請客人報<strong>姓名＋電話末三碼</strong>（可在搜尋框輸入末三碼）。</li>
+                        <li>點客人的卡片，<strong>兩項都一致</strong>才交貨；鏡組請照「款式明細」逐套核對。</li>
+                        <li>出現<span class="text-rose-600 font-bold">紅色「未確認付款」</span>：先收取顯示金額的現金，勾選後才能完成取貨。</li>
+                        <li>預購者若現場另外加買，請<strong>另外用一般結帳</strong>。</li>
+                    </ol>
+                </section>
+
+                <section class="space-y-2">
+                    <h4 class="font-bold text-slate-900 flex items-center gap-1.5 text-base border-b pb-1"><i data-lucide="rotate-ccw" class="w-4 h-4 text-slate-600"></i><span>作廢・退換貨</span></h4>
+                    <div class="overflow-hidden rounded-lg border border-slate-200 text-xs">
+                        <table class="w-full">
+                            <thead class="bg-slate-100 text-slate-700"><tr><th class="text-left p-2 w-24">情況</th><th class="text-left p-2">怎麼做</th></tr></thead>
+                            <tbody class="divide-y divide-slate-100 text-slate-600">
+                                <tr><td class="p-2 font-bold text-slate-800">客人要加買</td><td class="p-2">直接<strong>另開一張新單</strong>只收加買的錢。</td></tr>
+                                <tr><td class="p-2 font-bold text-slate-800">剛結完要改／不要了</td><td class="p-2">結帳後畫面下方會出現黑色提示列，按<strong>「作廢」</strong>：整張取消、全額退現、庫存加回，再重新結帳。<strong>開始結下一位客人後就不能作廢了。</strong></td></tr>
+                                <tr><td class="p-2 font-bold text-slate-800">瑕疵換同款</td><td class="p-2"><strong>不用操作 POS</strong>：志工如確認有瑕疵，瑕疵品收回不回庫存，更換新品時請客人現場檢查，請於收班時填寫備註+LINE回報:有客人鑰匙圈瑕疵退換，已經給換。</td></tr>
+                                <tr><td class="p-2 font-bold text-slate-800">退貨退款</td><td class="p-2"><strong>不用操作 POS</strong>：退還現金後，交班時現金會短少，請在<strong>備註寫明退了什麼、退多少錢與原因</strong>，並 LINE 回報。</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="space-y-2">
+                    <h4 class="font-bold text-slate-900 flex items-center gap-1.5 text-base border-b pb-1"><i data-lucide="package" class="w-4 h-4 text-slate-600"></i><span>包裝與提袋指引</span></h4>
+                    <ul class="space-y-2 text-xs text-slate-600">
+                        <li class="bg-amber-50 p-2.5 rounded-lg border border-amber-200 text-amber-900"><strong>【紙袋】</strong>：當客人購買多樣商品時，請提供紙袋<strong>若購買為單個，則詢問需不需要紙袋</strong>：「請問需要裝小紙袋嗎？紙袋需要加購1元」</li>
+                        <li><strong>包裝</strong>：包裝避免過度摺疊產生死褶。</li>
+                    </ul>
+                </section>
+            </div>
+
+            <div class="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                <button onclick="closeSopModal()" class="px-5 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition">我知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 設定 -->
+    <div id="settingsModal" class="fixed inset-0 bg-slate-900/40 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="font-bold text-slate-900 text-lg">裝置設定</h3>
+                <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1.5">這台裝置名稱</label>
+                <input type="text" id="deviceNameInput" placeholder="例：收銀 A"
+                       class="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-blue-500" />
+                <p class="text-[11px] text-slate-400 mt-1.5">會記錄在交班紀錄，方便分辨是哪一台。</p>
+            </div>
+            <button onclick="saveSettings()" class="w-full py-2.5 bg-blue-600 text-white font-semibold rounded-xl text-sm shadow hover:bg-blue-700 active:scale-95 transition">儲存</button>
+        </div>
+    </div>
+
+    <script>
+        // ======================= 設定 =======================
+        // ★ 把 Apps Script 部署網址貼在引號裡
+        const API_URL = "https://script.google.com/macros/s/AKfycbxgGGhSdPY0CH9rB8YXNBOwhTyI2PdI2suXukzwkyTO8FkDKAlILP1tSsX_DiiQ-lM/exec";
+
+        const AUTO_REFRESH_MS = 2 * 60 * 1000;   // 每 2 分鐘從試算表更新庫存與預購名單
+        const DENOMS = [1000, 500, 100, 50, 10, 5, 1];
+
+        const DEFAULT_PRODUCTS = [
+            { id: "P001", name: "壓克力鑰匙圈", price: 129, stock: 119, category: "週邊配件" },
+            { id: "P002", name: "零錢包", price: 129, stock: 94, category: "布品生活" },
+            { id: "P003", name: "貼紙 (大張)", price: 20, stock: 13, category: "貼紙文具" },
+            { id: "P004", name: "貼紙 (小張)", price: 10, stock: 10, category: "貼紙文具" },
+            { id: "P005", name: "明信片", price: 35, stock: 98, category: "貼紙文具" },
+            { id: "P006", name: "刺繡鑰匙圈", price: 229, stock: 100, category: "週邊配件" },
+            { id: "P007", name: "鏡子貼紙組", price: 189, stock: 100, category: "週邊配件" },
+            { id: "P008", name: "橘商店街貼紙", price: 50, stock: 40, category: "貼紙文具" },
+            { id: "P009", name: "章魚燒貼紙", price: 50, stock: 25, category: "貼紙文具" },
+            { id: "P010", name: "咖啡濾掛包", price: 50, stock: 25, category: "飲食選品" },
+            { id: "P011", name: "電器湯鑰匙圈", price: 50, stock: 25, category: "週邊配件" },
+            { id: "P012", name: "電器湯手絹", price: 50, stock: 25, category: "布品生活" },
+            { id: "P013", name: "飾品手環", price: 50, stock: 25, category: "週邊配件" },
+        ];
+        const BUNDLE_NOTES = { P004: "六張特價 $50", P005: "三張特價 $100" };
+        const PREORDER_CAT = "預購取貨";
+        const TYPE_LABEL = { sale: "銷售", void: "作廢", return: "退貨", exchange: "換貨", pickup: "預購取貨", pickup_void: "取消取貨", shift: "交班" };
+
+        const store = {
+            get(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch (e) { return fallback; } },
+            set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { console.warn("儲存失敗", e); } },
+            getStr(key) { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } },
+            setStr(key, val) { try { localStorage.setItem(key, val); } catch (e) {} },
+        };
+
+        const apiUrl = API_URL.trim();
+        let products = store.get("pos_products_v2", DEFAULT_PRODUCTS).map(normalizeProduct);
+        let preorders = store.get("pos_preorders_v1", []);
+        let orders = store.get("pos_orders_v2", []);   // 本機的銷售單與取貨單
+        let txLog = store.get("pos_tx_v1", []);        // 送往試算表的每一筆異動（含是否已同步）
+        let shifts = store.get("pos_shifts_v1", []);   // 本機的開班／交班／收攤紀錄
+        let deviceName = store.getStr("pos_device_name");
+
+        let cart = [];
+        let couponCount = 0;
+        let activeCategory = "全部";
+        let searchQuery = "";
+        let ordersScope = "today";
+        let syncPromise = null;
+        let syncAgain = false;
+        let fetching = false;
+        let toastTimer = null;
+        let rx = null;          // 退貨/換貨彈窗狀態
+        let pickupState = null;
+        let hs = null;          // 交班彈窗狀態
+
+        window.addEventListener("DOMContentLoaded", () => {
+            lucide.createIcons();
+            renderCategories();
+            renderProducts();
+            renderCart();
+            renderShiftBtn();
+            updateUnsyncedBadge();
+            if (apiUrl) {
+                fetchSheetData();
+                flushQueue();
+            } else {
+                updateSyncStatus("尚未設定試算表網址（API_URL）", "bg-amber-500");
+            }
+        });
+        window.addEventListener("online", () => flushQueue());
+        setInterval(() => flushQueue(), 60000);
+
+        // 自動重整：畫面開著、沒有彈窗時，定時抓最新庫存與預購名單
+        function autoRefresh() {
+            if (!apiUrl || document.hidden || syncPromise) return;
+            if (!document.getElementById("dynModal").classList.contains("hidden")) return;
+            fetchSheetData(true);
+        }
+        setInterval(autoRefresh, AUTO_REFRESH_MS);
+        document.addEventListener("visibilitychange", () => { if (!document.hidden) { autoRefresh(); flushQueue(); } });
+
+        // ======================= 工具 =======================
+        function escapeHtml(str) {
+            return String(str ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+        }
+        function dayKey(d = new Date()) { return new Date(d).toLocaleDateString("sv-SE"); } // YYYY-MM-DD（本地時區）
+        function fmtTime(ts, withDate = false) {
+            const o = withDate ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false } : { hour: "2-digit", minute: "2-digit", hour12: false };
+            return new Date(ts).toLocaleString("zh-TW", o);
+        }
+        function money(n) { const v = Number(n || 0); return (v < 0 ? "-NT$ " : "NT$ ") + Math.abs(v).toLocaleString(); }
+
+        function genId(prefix) {
+            const p = n => String(n).padStart(2, "0");
+            const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+            let id;
+            do {
+                const d = new Date();
+                id = `${prefix}-${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${letters[Math.floor(Math.random() * letters.length)]}`;
+            } while (orders.some(o => o.id === id) || txLog.some(t => t.id === id));
+            return id;
+        }
+
+        function toImageUrl(raw) {
+            const s = String(raw || "").trim();
+            if (!s) return "";
+            if (s.includes("drive.google.com") || s.includes("docs.google.com")) {
+                const m = s.match(/\/d\/([a-zA-Z0-9_-]+)/) || s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                if (m) return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w600`;
+            }
+            return s;
+        }
+        function imageBox(p, sizeClass, iconSize) {
+            const url = toImageUrl(p.image);
+            return `
+              <div class="relative ${sizeClass} flex-shrink-0 overflow-hidden bg-slate-100">
+                <div class="absolute inset-0 flex items-center justify-center text-slate-300"><i data-lucide="image" class="${iconSize} stroke-1"></i></div>
+                ${url ? `<img src="${escapeHtml(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="absolute inset-0 w-full h-full object-cover" onerror="this.style.display='none'">` : ""}
+              </div>`;
+        }
+        function normalizeProduct(p) {
+            return { ...p, price: Number(p.price) || 0, stock: Number(p.stock) || 0, image: p.image || "", note: p.note || BUNDLE_NOTES[p.id] || "" };
+        }
+
+        function saveProducts() { store.set("pos_products_v2", products); }
+        function saveOrders() { store.set("pos_orders_v2", orders.slice(0, 2000)); }
+        function saveTx() { store.set("pos_tx_v1", txLog); }
+        function savePreorders() { store.set("pos_preorders_v1", preorders); }
+        function saveShifts() { store.set("pos_shifts_v1", shifts); }
+
+        function adjustLocalStock(changes) {
+            changes.forEach(ch => {
+                const p = products.find(x => x.id === ch.id);
+                if (p) p.stock = Math.max(0, p.stock + ch.delta);
+            });
+            saveProducts();
+        }
+
+        function calculateSpecialDiscount(items) {
+            let discount = 0;
+            const p004 = items.find(i => i.id === "P004");
+            if (p004 && p004.count >= 6) discount += Math.floor(p004.count / 6) * 10;
+            const p005 = items.find(i => i.id === "P005");
+            if (p005 && p005.count >= 3) discount += Math.floor(p005.count / 3) * 5;
+            return discount;
+        }
+        function calcTotals(items, coupons) {
+            const subtotal = items.reduce((s, i) => s + i.price * i.count, 0);
+            const special = calculateSpecialDiscount(items);
+            const coupon = coupons * 5;
+            return { subtotal, special, coupon, total: Math.max(0, subtotal - special - coupon) };
+        }
+        function describeItems(items) { return items.map(i => `${i.name} x${i.count}`).join(", "); }
+        function mergeItems(list) {
+            const m = new Map();
+            list.forEach(i => {
+                const h = m.get(i.id) || { id: i.id, name: i.name, price: i.price, count: 0 };
+                h.count += i.count; m.set(i.id, h);
+            });
+            return [...m.values()].filter(i => i.count > 0);
+        }
+
+        // ======================= 雲端同步 =======================
+        function updateSyncStatus(text, dotColor) {
+            document.getElementById("syncStatusText").innerText = text;
+            document.getElementById("syncStatusIndicator").className = `inline-block w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`;
+        }
+        function updateUnsyncedBadge() {
+            const n = apiUrl ? txLog.filter(t => !t.synced).length : 0;
+            const badge = document.getElementById("unsyncedBadge");
+            badge.classList.toggle("hidden", n === 0);
+            badge.innerText = n;
+            const btn = document.getElementById("resyncBtn");
+            btn.classList.toggle("hidden", n === 0);
+            btn.disabled = !!syncPromise;
+            btn.innerText = syncPromise ? "上傳中，請稍候…" : `重新上傳未同步（${n}）`;
+        }
+
+        async function postToSheet(payload) {
+            if (!apiUrl) return false;
+            try {
+                await fetch(apiUrl, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(payload) });
+                return true;
+            } catch (err) {
+                console.error("同步失敗", err);
+                return false;
+            }
+        }
+
+        function recordTx(tx) {
+            txLog.push({ ...tx, timestamp: tx.timestamp || new Date().toISOString(), synced: false });
+            saveTx();
+            updateUnsyncedBadge();
+            flushQueue();
+        }
+
+        // 依順序送出所有未同步的紀錄；上傳中再按不會重複送出（試算表端也會用單號去重）
+        function flushQueue() {
+            if (!apiUrl) return Promise.resolve();
+            if (syncPromise) { syncAgain = true; return syncPromise; }
+            syncPromise = (async () => {
+                let failed = false;
+                while (true) {
+                    const t = txLog.find(x => !x.synced);
+                    if (!t) break;
+                    updateSyncStatus("寫入 Google 試算表中...", "bg-blue-500 animate-pulse");
+                    const { synced, ...payloadTx } = t;
+                    const ok = await postToSheet({ action: "tx", tx: payloadTx });
+                    if (!ok) { failed = true; break; }
+                    t.synced = true;
+                    saveTx();
+                    updateUnsyncedBadge();
+                }
+                const left = txLog.filter(x => !x.synced).length;
+                if (failed) updateSyncStatus(`離線中：${left} 筆待上傳（恢復連線自動補傳）`, "bg-rose-500");
+                else updateSyncStatus("雲端試算表已連線", "bg-emerald-500");
+                return !failed;
+            })().finally(() => {
+                syncPromise = null;
+                updateUnsyncedBadge();
+                refreshOrdersIfOpen();
+                if (syncAgain) { syncAgain = false; if (txLog.some(x => !x.synced)) flushQueue(); }
+            });
+            updateUnsyncedBadge();
+            return syncPromise;
+        }
+
+        async function manualRefresh() {
+            await fetchSheetData();
+        }
+
+        async function fetchSheetData(silent = false) {
+            if (!apiUrl) { if (!silent) alert("尚未設定試算表網址，請在 HTML 的 API_URL 填入網址。"); return; }
+            if (fetching) return;
+            fetching = true;
+            document.getElementById("refreshBtn").disabled = true;
+            if (!silent) updateSyncStatus("同步中...", "bg-blue-500 animate-pulse");
+            try {
+                const res = await fetch(apiUrl + (apiUrl.includes("?") ? "&" : "?") + "t=" + Date.now());
+                const result = await res.json();
+                if (result.status !== "success") throw new Error(result.message || "格式不符");
+                if (Array.isArray(result.data) && result.data.length) {
+                    products = result.data.map(normalizeProduct);
+                    // 尚未上傳的異動先套用到本機庫存，避免畫面數字被舊資料蓋掉
+                    txLog.filter(t => !t.synced && t.stock).forEach(t => t.stock.forEach(ch => {
+                        const p = products.find(x => x.id === ch.id);
+                        if (p) p.stock = Math.max(0, p.stock + ch.delta);
+                    }));
+                    saveProducts();
+                }
+                if (Array.isArray(result.preorders)) {
+                    preorders = result.preorders;
+                    applyLocalPreorderOverrides();
+                    savePreorders();
+                }
+                renderCategories();
+                renderProducts();
+                if (!syncPromise) updateSyncStatus(txLog.some(t => !t.synced) ? "有資料待上傳" : "雲端試算表已連線", "bg-emerald-500");
+            } catch (err) {
+                console.error("Sync Error:", err);
+                if (!syncPromise) updateSyncStatus("離線模式（使用本機資料）", "bg-amber-500");
+            } finally {
+                fetching = false;
+                document.getElementById("refreshBtn").disabled = false;
+            }
+        }
+
+        function applyLocalPreorderOverrides() {
+            txLog.filter(t => !t.synced && (t.type === "pickup" || t.type === "pickup_void")).forEach(t => {
+                const p = preorders.find(x => x.id === t.refId);
+                if (!p) return;
+                if (t.type === "pickup") Object.assign(p, { pickupStatus: "已取貨", pickupOrderId: t.id, pickupTime: fmtTime(t.timestamp, true) });
+                else Object.assign(p, { pickupStatus: "未取貨", pickupOrderId: "", pickupTime: "" });
+            });
+        }
+
+        // ======================= 分類 / 商品 / 預購卡 =======================
+        function renderCategories() {
+            const cats = ["全部", ...new Set(products.map(p => p.category || "一般"))];
+            const pending = preorders.filter(p => p.pickupStatus !== "已取貨").length;
+            let html = cats.map(cat => `
+              <button onclick="setCategory(${JSON.stringify(cat).replace(/"/g, "&quot;")})"
+                class="px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${activeCategory === cat ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}">
+                ${escapeHtml(cat)}
+              </button>`).join("");
+            if (preorders.length) {
+                const on = activeCategory === PREORDER_CAT;
+                html += `<span class="w-px h-5 bg-slate-200 mx-1 flex-shrink-0"></span>
+                  <button onclick="setCategory('${PREORDER_CAT}')"
+                    class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition border ${on ? "bg-amber-500 border-amber-500 text-white" : "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"}">
+                    <i data-lucide="package-check" class="w-3.5 h-3.5"></i>${PREORDER_CAT}
+                    <span class="px-1.5 rounded-md text-[10px] ${on ? "bg-white/25" : "bg-amber-200/70"}">${pending}</span>
+                  </button>`;
+            }
+            document.getElementById("categoryContainer").innerHTML = html;
+            lucide.createIcons();
+        }
+
+        function setCategory(cat) {
+            activeCategory = cat;
+            const isPre = cat === PREORDER_CAT;
+            const input = document.getElementById("searchInput");
+            input.placeholder = isPre ? "輸入姓名或電話末三碼…" : "搜尋商品名稱或編號...";
+            input.value = ""; searchQuery = "";
+            document.getElementById("preorderHint").classList.toggle("hidden", !isPre);
+            renderCategories();
+            renderProducts();
+            if (isPre && apiUrl) fetchSheetData(true); // 切過來時順便更新，降低兩台重複交貨的機會
+        }
+
+        function handleSearch() {
+            searchQuery = document.getElementById("searchInput").value.trim().toLowerCase();
+            renderProducts();
+        }
+
+        function emptyState(text) {
+            return `<div class="col-span-full py-16 text-center text-slate-400">
+                <i data-lucide="package-open" class="w-12 h-12 mx-auto stroke-1 mb-2"></i>
+                <p class="text-sm font-medium">${text}</p></div>`;
+        }
+
+        function renderProducts() {
+            if (activeCategory === PREORDER_CAT) return renderPreorders();
+            const grid = document.getElementById("productsGrid");
+            const filtered = products.filter(p => {
+                const matchesCategory = activeCategory === "全部" || (p.category || "一般") === activeCategory;
+                const matchesSearch = String(p.name).toLowerCase().includes(searchQuery) || String(p.id).toLowerCase().includes(searchQuery);
+                return matchesCategory && matchesSearch;
+            });
+            if (!filtered.length) { grid.innerHTML = emptyState("沒有找到相符商品"); lucide.createIcons(); return; }
+
+            grid.innerHTML = filtered.map(p => {
+                const idx = products.indexOf(p);
+                const isSoldOut = p.stock <= 0;
+                const isLowStock = p.stock > 0 && p.stock <= 10;
+                return `
+                  <div onclick="${isSoldOut ? "" : `addToCart(${idx})`}"
+                    class="group bg-white rounded-2xl p-3 border border-slate-200/80 hover:shadow-md transition-all flex flex-col ${isSoldOut ? "opacity-40 cursor-not-allowed" : "cursor-pointer active:scale-[0.98]"}">
+                    <div class="relative rounded-xl overflow-hidden mb-3">
+                      ${imageBox(p, "w-full aspect-square", "w-10 h-10")}
+                      <span class="absolute top-2 right-2 px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm ${isSoldOut ? "bg-rose-500 text-white" : isLowStock ? "bg-amber-500 text-white" : "bg-white/90 text-slate-700"}">
+                        ${isSoldOut ? "售罄" : `存: ${p.stock}`}
+                      </span>
+                    </div>
+                    <span class="text-[11px] font-mono text-slate-400 font-bold tracking-tight">${escapeHtml(p.id)}</span>
+                    <h4 class="font-bold text-slate-900 text-sm leading-snug line-clamp-2 min-h-[2.5rem]">${escapeHtml(p.name)}</h4>
+                    <p class="text-[11px] font-medium text-blue-600 mt-0.5 h-4 truncate">${escapeHtml(p.note || "")}</p>
+                    <div class="mt-auto pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                      <span class="text-base font-black text-slate-900">NT$ ${p.price}</span>
+                      <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition"><i data-lucide="plus" class="w-4 h-4"></i></div>
+                    </div>
+                  </div>`;
+            }).join("");
+            lucide.createIcons();
+        }
+
+        function isPaid(p) { return p.payStatus === "已付款" || p.payStatus === "現場補收"; }
+
+        function renderPreorders() {
+            const grid = document.getElementById("productsGrid");
+            const q = searchQuery;
+            const list = preorders
+                .map((p, idx) => ({ p, idx }))
+                .filter(({ p }) => !q || p.name.toLowerCase().includes(q) || p.last3.includes(q) || p.id.toLowerCase().includes(q))
+                .sort((a, b) => (a.p.pickupStatus === "已取貨") - (b.p.pickupStatus === "已取貨") || a.p.id.localeCompare(b.p.id));
+
+            if (!list.length) { grid.innerHTML = emptyState(q ? "找不到這位預購者，請再確認姓名或末三碼" : "目前沒有預購名單"); lucide.createIcons(); return; }
+
+            grid.innerHTML = list.map(({ p, idx }) => {
+                const done = p.pickupStatus === "已取貨";
+                const paid = isPaid(p);
+                const badge = done
+                    ? `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 text-slate-600">已取貨</span>`
+                    : paid
+                        ? `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-700">待取貨</span>`
+                        : `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500 text-white">未確認付款</span>`;
+                const sets = p.items.reduce((s, i) => s + i.count, 0);
+                return `
+                  <div onclick="openPickup(${idx})"
+                    class="cursor-pointer active:scale-[0.98] bg-white rounded-2xl p-4 border ${done ? "border-slate-200 opacity-55" : paid ? "border-amber-200 hover:border-amber-400" : "border-rose-300 hover:border-rose-400"} hover:shadow-md transition-all flex flex-col gap-2 min-h-[190px]">
+                    <div class="flex justify-between items-center">
+                      <span class="text-[11px] font-mono text-slate-400 font-bold">${escapeHtml(p.id)}</span>${badge}
+                    </div>
+                    <div>
+                      <div class="text-lg font-black text-slate-900 leading-tight truncate">${escapeHtml(p.name)}</div>
+                      <div class="text-xs text-slate-500 mt-1">電話末三碼 <span class="font-mono font-black text-slate-900 text-base tracking-wider">${escapeHtml(p.last3)}</span></div>
+                    </div>
+                    <ul class="text-[11px] text-slate-600 space-y-0.5 leading-snug">
+                      ${p.items.slice(0, 4).map(i => `<li class="flex justify-between gap-2"><span class="truncate">${escapeHtml(i.name)}</span><span class="font-bold">×${i.count}</span></li>`).join("")}
+                      ${p.items.length > 4 ? `<li class="text-slate-400">…還有 ${p.items.length - 4} 項</li>` : ""}
+                    </ul>
+                    <div class="mt-auto pt-2 border-t border-slate-100 flex justify-between text-[11px] text-slate-500">
+                      <span>共 ${sets} 件</span>
+                      <span>${done ? escapeHtml(p.pickupTime || "") : money(p.amount)}</span>
+                    </div>
+                  </div>`;
+            }).join("");
+            lucide.createIcons();
+        }
+
+        // ======================= 購物車 =======================
+        function addToCart(idx) {
+            hideToast();   // 開始結下一位客人 → 上一筆不再提供作廢
+            const product = products[idx];
+            if (!product || product.stock <= 0) return;
+            const item = cart.find(i => i.id === product.id);
+            if (item) { if (item.count < product.stock) item.count++; }
+            else cart.push({ ...product, count: 1 });
+            renderCart();
+        }
+        function updateCartCount(id, delta) {
+            const item = cart.find(i => i.id === id);
+            const product = products.find(p => p.id === id);
+            if (!item) return;
+            const n = item.count + delta;
+            if (n <= 0) cart = cart.filter(i => i.id !== id);
+            else if (n <= (product ? product.stock : item.count)) item.count = n;
+            renderCart();
+        }
+        function changeCouponCount(delta) { couponCount = Math.max(0, couponCount + delta); renderCart(); }
+        function clearCart() { cart = []; couponCount = 0; renderCart(); }
+
+        function renderCart() {
+            const container = document.getElementById("cartList");
+            const checkoutBtn = document.getElementById("checkoutBtn");
+            document.getElementById("couponCountDisplay").innerText = `${couponCount} 張`;
+            const t = calcTotals(cart, couponCount);
+            document.getElementById("cartSubtotal").innerText = t.subtotal.toLocaleString();
+            document.getElementById("specialDiscountTotal").innerText = t.special.toLocaleString();
+            document.getElementById("couponDiscountTotal").innerText = (cart.length ? t.coupon : 0).toLocaleString();
+            document.getElementById("cartTotal").innerText = (cart.length ? t.total : 0).toLocaleString();
+            document.getElementById("cartCountSummary").innerText = `${cart.reduce((s, i) => s + i.count, 0)} 件`;
+            checkoutBtn.disabled = cart.length === 0;
+
+            if (!cart.length) {
+                container.innerHTML = `
+                  <div class="h-full flex flex-col items-center justify-center text-slate-300 py-16">
+                    <i data-lucide="shopping-bag" class="w-10 h-10 stroke-1 mb-2"></i>
+                    <p class="text-xs font-semibold text-slate-400">尚未加入任何商品</p>
+                  </div>`;
+                lucide.createIcons();
+                return;
+            }
+            container.innerHTML = cart.map(item => `
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-100 gap-2">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="rounded-lg overflow-hidden">${imageBox(item, "w-10 h-10", "w-4 h-4")}</div>
+                  <div class="min-w-0">
+                    <h5 class="text-xs font-bold text-slate-900 truncate">${escapeHtml(item.name)}</h5>
+                    <div class="text-[11px] text-slate-400 mt-0.5">NT$ ${item.price}</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <div class="flex items-center bg-white rounded-lg border border-slate-200 p-0.5">
+                    <button onclick="updateCartCount('${escapeHtml(item.id)}', -1)" class="w-6 h-6 flex items-center justify-center text-slate-500 hover:bg-slate-100 rounded"><i data-lucide="minus" class="w-3 h-3"></i></button>
+                    <span class="w-6 text-center text-xs font-bold text-slate-800">${item.count}</span>
+                    <button onclick="updateCartCount('${escapeHtml(item.id)}', 1)" class="w-6 h-6 flex items-center justify-center text-slate-500 hover:bg-slate-100 rounded"><i data-lucide="plus" class="w-3 h-3"></i></button>
+                  </div>
+                  <span class="w-16 text-right text-xs font-black text-slate-900">NT$ ${item.price * item.count}</span>
+                </div>
+              </div>`).join("");
+            lucide.createIcons();
+        }
+
+        // ======================= 結帳 =======================
+        // ---------- 收款鍵盤 ----------
+        let pay = null;   // { total, input }
+
+        function handleCheckout() {
+            if (!cart.length) return;
+            pay = { total: calcTotals(cart, couponCount).total, input: "" };
+            renderPayModal();
+            openDyn("max-w-md");
+        }
+
+        function quickAmounts(total) {
+            const c = [];
+            [100, 500, 1000].forEach(step => {
+                const v = Math.ceil((total + 1) / step) * step;
+                if (v > total && !c.includes(v)) c.push(v);
+            });
+            if (total < 1000 && !c.includes(1000)) c.push(1000);
+            return c.sort((a, b) => a - b).slice(0, 3);
+        }
+
+        function renderPayModal() {
+            const key = (label, fn, cls = "bg-white hover:bg-slate-100 text-slate-900") =>
+                `<button onclick="${fn}" class="h-14 rounded-xl border border-slate-200 text-2xl font-bold active:scale-95 transition ${cls}">${label}</button>`;
+            document.getElementById("dynModalBox").innerHTML = `
+              <div class="px-6 py-4 bg-blue-600 text-white flex justify-between items-center">
+                <div class="flex items-center gap-2"><i data-lucide="banknote" class="w-5 h-5"></i><h3 class="font-bold">現金收款</h3></div>
+                <button onclick="closeDyn()" class="text-white/80 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+              </div>
+              <div class="p-5 space-y-3 overflow-y-auto">
+                <div class="flex justify-between items-baseline">
+                  <span class="text-sm font-bold text-slate-500">應收</span>
+                  <span class="text-3xl font-black text-slate-900 tabular-nums">${money(pay.total)}</span>
+                </div>
+                <div class="rounded-xl bg-slate-100 px-4 py-3 flex justify-between items-baseline">
+                  <span class="text-sm font-bold text-slate-500">收您</span>
+                  <span id="payInput" class="text-3xl font-black text-slate-900 tabular-nums"></span>
+                </div>
+                <div id="payChange" class="rounded-xl px-4 py-3 flex justify-between items-baseline"></div>
+                <div class="grid grid-cols-4 gap-2">
+                  ${key("剛好", `setPay(${pay.total})`, "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 !text-base")}
+                  ${quickAmounts(pay.total).map(v => key(v.toLocaleString(), `setPay(${v})`, "bg-blue-50 hover:bg-blue-100 text-blue-700 !text-base")).join("")}
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                  ${[7, 8, 9, 4, 5, 6, 1, 2, 3].map(n => key(n, `payKey('${n}')`)).join("")}
+                  ${key("00", "payKey('00')")}${key("0", "payKey('0')")}
+                  ${key('<i data-lucide="delete" class="w-6 h-6 mx-auto"></i>', "payBack()", "bg-slate-100 hover:bg-slate-200 text-slate-600")}
+                </div>
+                <button onclick="setPay('')" class="w-full text-xs font-semibold text-slate-400 hover:text-slate-600 py-1">清除重打</button>
+              </div>
+              <div class="px-5 pb-5 flex gap-2">
+                <button onclick="closeDyn()" class="flex-1 py-4 rounded-xl bg-slate-100 text-slate-700 font-bold">返回</button>
+                <button id="payConfirm" onclick="confirmPay()" class="flex-[2] py-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-base"></button>
+              </div>`;
+            lucide.createIcons();
+            updatePay();
+        }
+
+        function payReceived() { return pay.input === "" ? null : Number(pay.input); }
+        function payKey(d) { if (!pay) return; if ((pay.input + d).length > 6) return; pay.input = String(Number(pay.input + d)); updatePay(); }
+        function payBack() { if (!pay) return; pay.input = pay.input.slice(0, -1); updatePay(); }
+        function setPay(v) { if (!pay) return; pay.input = v === "" ? "" : String(v); updatePay(); }
+
+        function updatePay() {
+            const r = payReceived();
+            document.getElementById("payInput").innerText = r === null ? "—" : money(r);
+            const box = document.getElementById("payChange");
+            const btn = document.getElementById("payConfirm");
+            if (r === null) {
+                box.className = "rounded-xl px-4 py-3 flex justify-between items-baseline bg-slate-50 border-2 border-dashed border-slate-200";
+                box.innerHTML = `<span class="text-sm text-slate-400">輸入收到的金額，或按上方快捷鍵</span>`;
+                btn.disabled = true; btn.innerText = "完成結帳";
+            } else if (r < pay.total) {
+                box.className = "rounded-xl px-4 py-3 flex justify-between items-baseline bg-rose-50 border border-rose-200";
+                box.innerHTML = `<span class="text-sm font-bold text-rose-600">還差</span><span class="text-3xl font-black text-rose-600 tabular-nums">${money(pay.total - r)}</span>`;
+                btn.disabled = true; btn.innerText = "金額不足";
+            } else {
+                const c = r - pay.total;
+                box.className = "rounded-xl px-4 py-3 flex justify-between items-baseline bg-emerald-50 border border-emerald-300";
+                box.innerHTML = `<span class="text-base font-bold text-emerald-700">找零</span><span class="text-5xl font-black text-emerald-700 tabular-nums">${money(c)}</span>`;
+                btn.disabled = false; btn.innerText = c ? `完成結帳（找 ${money(c)}）` : "完成結帳";
+            }
+        }
+
+        function confirmPay() {
+            if (!pay) return;
+            const r = payReceived();
+            if (r === null || r < pay.total) return;
+            const received = r, change = r - pay.total;
+            pay = null;
+            closeDyn();
+            finalizeCheckout(received, change);
+        }
+
+        // 收款鍵盤也可用實體鍵盤：數字、Backspace、Enter、Esc
+        document.addEventListener("keydown", e => {
+            if (!pay) return;
+            if (/^[0-9]$/.test(e.key)) { payKey(e.key); e.preventDefault(); }
+            else if (e.key === "Backspace") { payBack(); e.preventDefault(); }
+            else if (e.key === "Enter") { confirmPay(); e.preventDefault(); }
+            else if (e.key === "Escape") { closeDyn(); }
+        });
+
+        function finalizeCheckout(received, change) {
+            if (!cart.length) return;
+            const t = calcTotals(cart, couponCount);
+            const ts = new Date().toISOString();
+            const order = {
+                id: genId("S"), type: "sale", timestamp: ts,
+                items: cart.map(i => ({ id: i.id, name: i.name, price: i.price, count: i.count })),
+                subtotal: t.subtotal, specialDiscount: t.special, couponCount, couponDiscount: t.coupon,
+                totalAmount: t.total, netPaid: t.total, status: "completed", received, change,
+                returned: {}, exchanged: {}, added: [], refunded: 0, events: []
+            };
+            const stock = order.items.map(i => ({ id: i.id, delta: -i.count }));
+            adjustLocalStock(stock);
+            orders.unshift(order);
+            saveOrders();
+
+            let desc = describeItems(order.items);
+            if (order.couponCount) desc += `｜折價券 x${order.couponCount}`;
+            if (order.specialDiscount) desc += `｜組合折 -${order.specialDiscount}`;
+            recordTx({
+                id: order.id, type: "sale", timestamp: ts, amount: order.totalAmount, desc, note: `收 ${received} 找 ${change}`, stock,
+                qty: order.items.map(i => ({ id: i.id, name: i.name, qty: i.count }))
+            });
+
+            clearCart();
+            renderProducts();
+            showToast(`已結帳 ${order.id}｜收 ${money(received)}・找 ${money(change)}`, [
+                { label: "作廢", cls: "bg-rose-500 text-white hover:bg-rose-400", fn: `voidOrder('${order.id}')` },
+            ]);
+        }
+
+        function showToast(text, actions = []) {
+            document.getElementById("toastText").innerText = text;
+            document.getElementById("toastActions").innerHTML = actions.map(a =>
+                `<button onclick="hideToast();${a.fn}" class="px-3 py-1.5 rounded-lg text-xs font-bold active:scale-95 ${a.cls}">${a.label}</button>`).join("");
+            document.getElementById("toast").classList.remove("hidden");
+            clearTimeout(toastTimer);
+            // 有「作廢」按鈕的提示會一直留著，直到開始結下一位客人；一般提示 6 秒後消失
+            if (!actions.length) toastTimer = setTimeout(hideToast, 6000);
+        }
+        function hideToast() { document.getElementById("toast").classList.add("hidden"); }
+
+        // ======================= 訂單內容（含退換貨後） =======================
+        function holdings(o) {     // 客人目前手上這張單的商品
+            const merged = mergeItems([...o.items, ...(o.added || [])].map(i => ({ ...i })));
+            return merged.map(h => ({ ...h, count: h.count - ((o.returned || {})[h.id] || 0) }));
+        }
+        function netPaid(o) { return o.netPaid ?? (o.totalAmount - (o.refunded || 0)); }
+        function hasAfterSale(o) {
+            return Object.values(o.returned || {}).some(n => n > 0) || Object.values(o.exchanged || {}).some(n => n > 0) || (o.added || []).length > 0;
+        }
+        function canVoid(o) { return o.status === "completed" && !hasAfterSale(o) && dayKey(o.timestamp) === dayKey(); }
+
+        // ======================= 作廢 =======================
+        function voidOrder(id) {
+            const o = orders.find(x => x.id === id);
+            if (!o || o.type !== "sale") return;
+            if (!canVoid(o)) {
+                alert(hasAfterSale(o) ? "這張單已經有退貨／換貨紀錄，不能整張作廢。\n請用「退貨」把剩下的品項退掉。" : "只能作廢當天的訂單。非當天請用「退貨」。");
+                return;
+            }
+            if (!confirm(`確定作廢 ${o.id}？\n\n${describeItems(o.items)}\n\n請退還客人 ${money(o.totalAmount)}，商品會加回庫存。`)) return;
+            const vid = genId("V");
+            const stock = o.items.map(i => ({ id: i.id, delta: i.count }));
+            adjustLocalStock(stock);
+            o.status = "voided";
+            o.events = o.events || [];
+            o.events.push({ id: vid, type: "void", timestamp: new Date().toISOString(), amount: -o.totalAmount });
+            saveOrders();
+            recordTx({
+                id: vid, type: "void", refId: o.id, amount: -o.totalAmount, desc: `作廢 ${o.id}：${describeItems(o.items)}`, note: `退還 ${o.totalAmount}`, stock,
+                qty: o.items.map(i => ({ id: i.id, name: i.name, qty: -i.count }))
+            });
+            renderProducts();
+            refreshOrdersIfOpen();
+            showToast(`已作廢 ${o.id}，請退還 ${money(o.totalAmount)}`);
+        }
+
+        // ======================= 退貨 / 換貨 =======================
+        function openReturn(id, mode) {
+            const o = orders.find(x => x.id === id);
+            if (!o || o.type !== "sale" || o.status !== "completed") return;
+            o.added = o.added || []; o.returned = o.returned || {}; o.exchanged = o.exchanged || {}; o.events = o.events || [];
+            if (!holdings(o).some(i => i.count > 0)) { alert("這張單的商品都已退貨。"); return; }
+            rx = { orderId: id, mode, sub: "other", qty: {}, cond: {}, add: {}, search: "" };
+            holdings(o).forEach(i => { rx.qty[i.id] = 0; rx.cond[i.id] = "good"; });
+            renderReturnModal();
+            openDyn();
+        }
+
+        function rxPreview(o) {
+            const paid = netPaid(o);
+            const kept = holdings(o).map(i => ({ ...i, count: i.count - (rx.qty[i.id] || 0) }));
+            if (rx.mode === "return") {
+                const newTotal = calcTotals(kept.filter(i => i.count > 0), o.couponCount || 0).total;
+                return { paid, newTotal, diff: newTotal - paid };
+            }
+            const addList = Object.entries(rx.add).filter(([, n]) => n > 0).map(([id, n]) => {
+                const p = products.find(x => x.id === id);
+                return { id, name: p.name, price: p.price, count: n };
+            });
+            const newTotal = calcTotals(mergeItems([...kept, ...addList]), o.couponCount || 0).total;
+            return { paid, newTotal, diff: newTotal - paid, addList };
+        }
+
+        function stepper(fn, val, max, size = "w-8 h-8") {
+            return `<div class="flex items-center bg-white rounded-lg border border-slate-200 p-0.5 flex-shrink-0">
+                <button onclick="${fn}(-1, ${max})" class="${size} flex items-center justify-center text-slate-500 hover:bg-slate-100 rounded"><i data-lucide="minus" class="w-4 h-4"></i></button>
+                <span class="w-10 text-center text-sm font-black">${val}<span class="text-slate-300 font-normal">/${max}</span></span>
+                <button onclick="${fn}(1, ${max})" class="${size} flex items-center justify-center text-slate-500 hover:bg-slate-100 rounded"><i data-lucide="plus" class="w-4 h-4"></i></button>
+              </div>`;
+        }
+
+        function renderReturnModal() {
+            const o = orders.find(x => x.id === rx.orderId);
+            const isReturn = rx.mode === "return";
+            const isSame = !isReturn && rx.sub === "same";
+            const pv = rxPreview(o);
+            const anyBack = Object.values(rx.qty).some(n => n > 0);
+            const anyAdd = Object.values(rx.add).some(n => n > 0);
+            const ready = isReturn || isSame ? anyBack : (anyBack && anyAdd);
+
+            const rows = holdings(o).filter(i => i.count > 0).map(i => {
+                const prod = products.find(p => p.id === i.id);
+                const max = isSame ? Math.min(i.count, prod ? prod.stock : 0) : i.count;
+                const q = rx.qty[i.id] || 0;
+                const condBtns = isSame
+                    ? (prod && prod.stock <= 0 ? `<span class="text-[11px] text-rose-500 font-bold">已無庫存，請改用「換其他商品」或退貨</span>` : "")
+                    : `<div class="flex bg-slate-100 rounded-lg p-0.5 text-[11px] font-bold ${q ? "" : "opacity-40 pointer-events-none"}">
+                        <button onclick="setCond('${i.id}','good')" class="px-2 py-1 rounded-md ${rx.cond[i.id] === "good" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500"}">良品・回庫存</button>
+                        <button onclick="setCond('${i.id}','defect')" class="px-2 py-1 rounded-md ${rx.cond[i.id] === "defect" ? "bg-white text-rose-600 shadow-sm" : "text-slate-500"}">瑕疵・不回庫</button>
+                      </div>`;
+                return `
+                  <div class="p-3 rounded-xl border ${q ? "border-blue-300 bg-blue-50/40" : "border-slate-200"} space-y-2">
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="text-sm font-bold text-slate-900 truncate">${escapeHtml(i.name)}</div>
+                        <div class="text-[11px] text-slate-500">客人手上 ${i.count}・單價 ${i.price}</div>
+                      </div>
+                      ${stepper(`setRxQty.bind(null,'${i.id}')`, q, max)}
+                    </div>
+                    ${condBtns}
+                  </div>`;
+            }).join("");
+
+            let addSection = "";
+            if (!isReturn && !isSame) {
+                addSection = `
+                  <div class="pt-2">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                      <div class="text-xs font-bold text-slate-700">② 換成什麼</div>
+                      <input value="${escapeHtml(rx.search)}" oninput="rx.search=this.value;renderAddList()" placeholder="搜尋商品…" class="w-40 bg-slate-100 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div id="addList" class="space-y-1.5 max-h-56 overflow-y-auto pr-1">${addListHtml()}</div>
+                  </div>`;
+            }
+
+            let summary;
+            if (isReturn) {
+                summary = `
+                <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs space-y-1">
+                  <div class="flex justify-between text-slate-500"><span>原單目前實收</span><span>${money(pv.paid)}</span></div>
+                  <div class="flex justify-between text-slate-500"><span>剩餘商品重新計價${o.couponCount ? `（含折價券 ${o.couponCount} 張）` : ""}</span><span>${money(pv.newTotal)}</span></div>
+                  <div class="flex justify-between items-baseline pt-1.5 border-t border-slate-200"><span class="font-bold text-slate-800">應退客人</span><span class="text-xl font-black text-rose-600">${money(-pv.diff)}</span></div>
+                  <p class="text-[10px] text-slate-400 pt-1">退款＝實收 − 剩下商品重新計價；折價券不退現。<strong class="text-rose-500">交班時須在備註寫退貨原因。</strong></p>
+                </div>`;
+            } else if (isSame) {
+                summary = `<div class="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">不收不退錢。給客人<strong>同款新品</strong>（扣庫存），收回的瑕疵品<strong>不回庫存</strong>，請另外放置。</div>`;
+            } else {
+                const d = pv.diff;
+                summary = `
+                <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs space-y-1">
+                  <div class="flex justify-between text-slate-500"><span>原單目前實收</span><span>${money(pv.paid)}</span></div>
+                  <div class="flex justify-between text-slate-500"><span>換貨後重新計價${o.couponCount ? `（含折價券 ${o.couponCount} 張）` : ""}</span><span>${money(pv.newTotal)}</span></div>
+                  <div class="flex justify-between items-baseline pt-1.5 border-t border-slate-200">
+                    <span class="font-bold text-slate-800">${d > 0 ? "向客人補收" : d < 0 ? "退還客人" : "不用找補"}</span>
+                    <span class="text-xl font-black ${d > 0 ? "text-blue-700" : d < 0 ? "text-rose-600" : "text-slate-500"}">${d === 0 ? "NT$ 0" : money(Math.abs(d))}</span>
+                  </div>
+                </div>`;
+            }
+
+            const tabs = isReturn ? "" : `
+              <div class="flex bg-slate-100 rounded-xl p-1 text-xs font-bold">
+                <button onclick="setRxSub('other')" class="flex-1 py-2 rounded-lg ${rx.sub === "other" ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}">換其他商品／換色</button>
+                <button onclick="setRxSub('same')" class="flex-1 py-2 rounded-lg ${rx.sub === "same" ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}">瑕疵換同款</button>
+              </div>`;
+
+            const btnLabel = isReturn ? `確認退貨・退 ${money(-pv.diff)}` : isSame ? "確認換貨" :
+                pv.diff > 0 ? `確認換貨・補收 ${money(pv.diff)}` : pv.diff < 0 ? `確認換貨・退 ${money(-pv.diff)}` : "確認換貨";
+
+            document.getElementById("dynModalBox").innerHTML = `
+              <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-start">
+                <div>
+                  <h3 class="font-bold text-slate-900">${isReturn ? "退貨退款" : "換貨"}・<span class="font-mono">${o.id}</span></h3>
+                  <p class="text-[11px] text-slate-400 mt-0.5">${fmtTime(o.timestamp, true)}・目前實收 ${money(netPaid(o))}</p>
+                </div>
+                <button onclick="closeDyn()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+              </div>
+              <div class="p-5 overflow-y-auto space-y-2.5">
+                ${tabs}
+                ${!isReturn && !isSame ? `<div class="text-xs font-bold text-slate-700 pt-1">① 客人拿回來的</div>` : ""}
+                ${rows}
+                ${addSection}
+              </div>
+              <div class="px-5 pb-5 space-y-3">
+                ${summary}
+                <div class="flex gap-2">
+                  <button onclick="closeDyn()" class="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm">取消</button>
+                  <button onclick="confirmReturn()" ${ready ? "" : "disabled"} class="flex-[2] py-3 rounded-xl ${isReturn ? "bg-rose-600 hover:bg-rose-700" : "bg-amber-500 hover:bg-amber-600"} disabled:bg-slate-300 text-white font-bold text-sm">${btnLabel}</button>
+                </div>
+              </div>`;
+            lucide.createIcons();
+        }
+
+        function addListHtml() {
+            const s = rx.search.toLowerCase();
+            const list = products.filter(p => (rx.add[p.id] || 0) > 0 || (p.stock > 0 && (!s || p.name.toLowerCase().includes(s) || p.id.toLowerCase().includes(s))));
+            if (!list.length) return `<p class="text-xs text-slate-400 py-2">沒有相符的商品</p>`;
+            return list.map(p => {
+                const n = rx.add[p.id] || 0;
+                return `<div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border ${n ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}">
+                    <div class="min-w-0"><div class="text-sm font-bold text-slate-800 truncate">${escapeHtml(p.name)}</div><div class="text-[11px] text-slate-500">NT$ ${p.price}・存 ${p.stock}</div></div>
+                    ${stepper(`setRxAdd.bind(null,'${p.id}')`, n, p.stock, "w-7 h-7")}
+                  </div>`;
+            }).join("");
+        }
+        function renderAddList() {
+            document.getElementById("addList").innerHTML = addListHtml();
+            lucide.createIcons();
+        }
+
+        function setRxQty(id, d, max) { rx.qty[id] = Math.min(max, Math.max(0, (rx.qty[id] || 0) + d)); renderReturnModal(); }
+        function setRxAdd(id, d, max) { rx.add[id] = Math.min(max, Math.max(0, (rx.add[id] || 0) + d)); renderReturnModal(); }
+        function setCond(id, c) { rx.cond[id] = c; renderReturnModal(); }
+        function setRxSub(s) { rx.sub = s; Object.keys(rx.qty).forEach(k => rx.qty[k] = 0); rx.add = {}; renderReturnModal(); }
+
+        function confirmReturn() {
+            const o = orders.find(x => x.id === rx.orderId);
+            const sel = holdings(o).filter(i => rx.qty[i.id] > 0).map(i => ({ ...i, count: rx.qty[i.id], cond: rx.cond[i.id] }));
+            if (!sel.length) return;
+            const ts = new Date().toISOString();
+            const pv = rxPreview(o);
+
+            if (rx.mode === "return") {
+                const refund = Math.max(0, -pv.diff);
+                const stock = sel.filter(i => i.cond === "good").map(i => ({ id: i.id, delta: i.count }));
+                const id = genId("R");
+                sel.forEach(i => { o.returned[i.id] = (o.returned[i.id] || 0) + i.count; });
+                o.refunded = (o.refunded || 0) + refund;
+                o.netPaid = netPaid(o) - refund;
+                o.events.push({ id, type: "return", timestamp: ts, amount: -refund, desc: describeItems(sel) });
+                adjustLocalStock(stock);
+                saveOrders();
+                recordTx({
+                    id, type: "return", refId: o.id, timestamp: ts, amount: -refund,
+                    desc: `退 ${o.id}：` + sel.map(i => `${i.name} x${i.count}（${i.cond === "good" ? "良品回庫" : "瑕疵不回庫"}）`).join(", "),
+                    note: `退款 ${refund}`, stock,
+                    qty: sel.map(i => ({ id: i.id, name: i.name, qty: -i.count }))
+                });
+                closeDyn();
+                showToast(`已退貨 ${id}，請退還客人 ${money(refund)}`);
+            } else if (rx.sub === "same") {
+                const stock = sel.map(i => ({ id: i.id, delta: -i.count }));
+                const id = genId("X");
+                sel.forEach(i => { o.exchanged[i.id] = (o.exchanged[i.id] || 0) + i.count; });
+                o.events.push({ id, type: "exchange", timestamp: ts, amount: 0, desc: "瑕疵換同款 " + describeItems(sel) });
+                adjustLocalStock(stock);
+                saveOrders();
+                recordTx({
+                    id, type: "exchange", refId: o.id, timestamp: ts, amount: 0,
+                    desc: `瑕疵換同款 ${o.id}：` + describeItems(sel) + "（瑕疵品不回庫）", note: "不收不退", stock
+                });
+                closeDyn();
+                showToast(`已換貨 ${id}，請給客人同款新品`);
+            } else {
+                const addList = pv.addList;
+                if (!addList.length) return;
+                const diff = pv.diff;
+                const stock = [
+                    ...sel.filter(i => i.cond === "good").map(i => ({ id: i.id, delta: i.count })),
+                    ...addList.map(i => ({ id: i.id, delta: -i.count }))
+                ];
+                const id = genId("X");
+                sel.forEach(i => { o.returned[i.id] = (o.returned[i.id] || 0) + i.count; });
+                o.added.push(...addList);
+                o.netPaid = netPaid(o) + diff;
+                if (diff < 0) o.refunded = (o.refunded || 0) - diff;
+                o.events.push({ id, type: "exchange", timestamp: ts, amount: diff, desc: `${describeItems(sel)} → ${describeItems(addList)}` });
+                adjustLocalStock(stock);
+                saveOrders();
+                recordTx({
+                    id, type: "exchange", refId: o.id, timestamp: ts, amount: diff,
+                    desc: `換貨 ${o.id}：` + sel.map(i => `${i.name} x${i.count}${i.cond === "good" ? "" : "（瑕疵不回庫）"}`).join(", ") + " → " + describeItems(addList),
+                    note: diff > 0 ? `補收 ${diff}` : diff < 0 ? `退還 ${-diff}` : "等值交換", stock,
+                    qty: [...sel.map(i => ({ id: i.id, name: i.name, qty: -i.count })), ...addList.map(i => ({ id: i.id, name: i.name, qty: i.count }))]
+                });
+                closeDyn();
+                showToast(`已換貨 ${id}` + (diff > 0 ? `，請向客人補收 ${money(diff)}` : diff < 0 ? `，請退還客人 ${money(-diff)}` : "，不用找補"));
+            }
+            rx = null;
+            renderProducts();
+            refreshOrdersIfOpen();
+        }
+
+        // ======================= 預購取貨 =======================
+        function openPickup(idx) {
+            const p = preorders[idx];
+            if (!p) return;
+            pickupState = { idx, collected: false };
+            renderPickupModal();
+            openDyn();
+        }
+
+        function renderPickupModal() {
+            const p = preorders[pickupState.idx];
+            const done = p.pickupStatus === "已取貨";
+            const paid = isPaid(p);
+            const canConfirm = !done && (paid || pickupState.collected);
+
+            const payBox = done ? `
+                <div class="rounded-xl bg-slate-100 border border-slate-200 p-3 text-sm text-slate-700 flex items-center gap-2">
+                  <i data-lucide="check-check" class="w-5 h-5 text-slate-500"></i>
+                  <div>已於 <strong>${escapeHtml(p.pickupTime || "")}</strong> 取貨<div class="text-[11px] text-slate-500 font-mono">${escapeHtml(p.pickupOrderId || "")}</div></div>
+                </div>` : paid ? `
+                <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800 flex items-center gap-2">
+                  <i data-lucide="badge-check" class="w-5 h-5"></i><span>${p.payStatus === "現場補收" ? "已現場補收" : "已匯款"} ${money(p.amount)}・<strong>現場不用收錢</strong></span>
+                </div>` : `
+                <div class="rounded-xl bg-rose-50 border-2 border-rose-300 p-3 space-y-2">
+                  <div class="flex items-center gap-2 text-rose-700 font-bold text-sm"><i data-lucide="alert-triangle" class="w-5 h-5"></i>未確認付款（${escapeHtml(p.payStatus || "未填")}）</div>
+                  <p class="text-xs text-rose-700">請先向客人收取 <strong>${money(p.amount)}</strong> 現金；有疑問請先聯絡負責人再交貨。</p>
+                  <label class="flex items-center gap-2 text-sm font-bold text-rose-800 bg-white rounded-lg px-3 py-2 border border-rose-200 cursor-pointer">
+                    <input type="checkbox" ${pickupState.collected ? "checked" : ""} onchange="pickupState.collected=this.checked;renderPickupModal()" class="w-4 h-4 accent-rose-600">
+                    已現場收取 ${money(p.amount)} 現金
+                  </label>
+                </div>`;
+
+            document.getElementById("dynModalBox").innerHTML = `
+              <div class="px-6 py-4 bg-amber-500 text-white flex justify-between items-center">
+                <div class="flex items-center gap-2"><i data-lucide="package-check" class="w-5 h-5"></i><h3 class="font-bold">預購取貨核對</h3><span class="font-mono text-xs opacity-80">${escapeHtml(p.id)}</span></div>
+                <button onclick="closeDyn()" class="text-white/80 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+              </div>
+              <div class="p-5 overflow-y-auto space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <div class="text-[11px] text-slate-500 font-semibold">姓名</div>
+                    <div class="text-2xl font-black text-slate-900 truncate">${escapeHtml(p.name)}</div>
+                  </div>
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <div class="text-[11px] text-slate-500 font-semibold">電話末三碼</div>
+                    <div class="text-2xl font-black text-slate-900 font-mono tracking-widest">${escapeHtml(p.last3)}</div>
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs font-bold text-slate-700 mb-1.5">交付品項</div>
+                  <div class="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                    ${p.items.map(i => `<div class="flex justify-between px-3 py-2 text-sm"><span>${escapeHtml(i.name)}</span><span class="font-black">× ${i.count}</span></div>`).join("") || `<div class="px-3 py-2 text-sm text-slate-400">（無品項）</div>`}
+                  </div>
+                </div>
+                ${p.mirrorDetail ? `
+                <div>
+                  <div class="text-xs font-bold text-slate-700 mb-1.5">鏡組款式（逐套核對）</div>
+                  <div class="rounded-xl bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-blue-900 whitespace-pre-line leading-relaxed">${escapeHtml(p.mirrorDetail)}</div>
+                </div>` : ""}
+                ${p.note ? `<div class="text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2"><span class="font-bold">顧客備註：</span>${escapeHtml(p.note)}</div>` : ""}
+                ${payBox}
+              </div>
+              <div class="px-5 pb-5 flex gap-2">
+                <button onclick="closeDyn()" class="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm">${done ? "關閉" : "取消"}</button>
+                ${done ? "" : `<button onclick="confirmPickup()" ${canConfirm ? "" : "disabled"} class="flex-[2] py-3 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold text-sm">已核對姓名＋末三碼，完成交貨</button>`}
+              </div>`;
+            lucide.createIcons();
+        }
+
+        function confirmPickup() {
+            const p = preorders[pickupState.idx];
+            if (!p || p.pickupStatus === "已取貨") return;
+            const paid = isPaid(p);
+            if (!paid && !pickupState.collected) return;
+            const collect = paid ? 0 : p.amount;
+            const id = genId("PU");
+            const ts = new Date().toISOString();
+            Object.assign(p, { pickupStatus: "已取貨", pickupTime: fmtTime(ts, true), pickupOrderId: id });
+            if (collect) p.payStatus = "現場補收";
+            savePreorders();
+            orders.unshift({ id, type: "pickup", timestamp: ts, preorderId: p.id, name: p.name, last3: p.last3, items: p.items, totalAmount: collect, status: "completed" });
+            saveOrders();
+            recordTx({
+                id, type: "pickup", refId: p.id, timestamp: ts, amount: collect,
+                desc: `預購取貨 ${p.id} ${p.name}（${p.last3}）：` + p.items.map(i => `${i.name} x${i.count}`).join(", "),
+                note: collect ? `現場補收 ${collect}` : `已預付 ${p.amount}`,
+                items: p.items
+            });
+            closeDyn();
+            renderCategories();
+            renderProducts();
+            showToast(`${p.name} 取貨完成${collect ? `，已收 ${money(collect)}` : ""}`);
+        }
+
+        function undoPickup(orderId) {
+            const o = orders.find(x => x.id === orderId);
+            if (!o || o.status !== "completed") return;
+            if (!confirm(`取消 ${o.name} 的取貨紀錄？\n（交錯人、按錯時使用。商品請收回。${o.totalAmount ? `\n請退還現場補收的 ${money(o.totalAmount)}。` : ""}）`)) return;
+            const id = genId("PV");
+            o.status = "voided";
+            saveOrders();
+            const p = preorders.find(x => x.id === o.preorderId);
+            if (p) {
+                Object.assign(p, { pickupStatus: "未取貨", pickupTime: "", pickupOrderId: "" });
+                if (o.totalAmount) p.payStatus = "未付款";
+                savePreorders();
+            }
+            recordTx({ id, type: "pickup_void", refId: o.preorderId, amount: -o.totalAmount, desc: `取消取貨 ${o.id}：${o.name}`, note: "", items: o.items });
+            renderCategories();
+            renderProducts();
+            refreshOrdersIfOpen();
+        }
+
+        // ======================= 訂單紀錄 =======================
+        function openOrdersModal() { renderOrders(); document.getElementById("ordersModal").classList.remove("hidden"); }
+        function closeOrdersModal() { document.getElementById("ordersModal").classList.add("hidden"); }
+        function refreshOrdersIfOpen() { if (!document.getElementById("ordersModal").classList.contains("hidden")) renderOrders(); }
+        function setOrdersScope(s) { ordersScope = s; renderOrders(); }
+        function isSynced(id) { const t = txLog.find(x => x.id === id); return !t || t.synced; }
+
+        function renderOrders() {
+            document.getElementById("ordersTabToday").className = `px-3 py-1 rounded-md ${ordersScope === "today" ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}`;
+            document.getElementById("ordersTabAll").className = `px-3 py-1 rounded-md ${ordersScope === "all" ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}`;
+            updateUnsyncedBadge();
+            const q = document.getElementById("ordersSearch").value.trim().toLowerCase();
+            const today = dayKey();
+            const list = orders.filter(o =>
+                (ordersScope === "all" || dayKey(o.timestamp) === today) &&
+                (!q || o.id.toLowerCase().includes(q) || (o.name || "").toLowerCase().includes(q) || (o.last3 || "").includes(q) ||
+                    [...o.items, ...(o.added || [])].some(i => i.name.toLowerCase().includes(q))));
+
+            document.getElementById("ordersList").innerHTML = list.length
+                ? list.map(o => o.type === "pickup" ? pickupRow(o) : saleRow(o)).join("")
+                : `<p class="text-center text-sm text-slate-400 py-12">${q ? "找不到相符的訂單" : "還沒有訂單"}</p>`;
+            const day = summarize(t => dayKey(t.timestamp) === today);
+            document.getElementById("ordersSummary").innerText = `今天（本機）：銷售 ${day.saleCount} 筆・淨收 ${money(day.net)}・預購取貨 ${day.pickupCount} 筆`;
+            lucide.createIcons();
+        }
+
+        function syncTag(id) {
+            return apiUrl && !isSynced(id) ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 text-[10px] font-bold">未同步</span>` : "";
+        }
+
+        function saleRow(o) {
+            const voided = o.status === "voided";
+            const h = holdings(o);
+            const allReturned = !voided && h.every(i => i.count <= 0);
+            const items = h.map(i => {
+                const orig = o.items.find(x => x.id === i.id);
+                const tag = !orig ? `<span class="text-amber-600">（換入）</span>` : (o.exchanged || {})[i.id] ? `<span class="text-amber-600">（瑕疵換${o.exchanged[i.id]}）</span>` : "";
+                return i.count > 0 ? `${escapeHtml(i.name)} ×${i.count}${tag}` : `<span class="line-through text-slate-400">${escapeHtml(i.name)}</span>`;
+            }).join("、");
+            const events = (o.events || []).map(e => `
+                <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                  <i data-lucide="corner-down-right" class="w-3 h-3 flex-shrink-0"></i>
+                  <span class="font-mono">${e.id}</span><span>${TYPE_LABEL[e.type]}</span><span>${fmtTime(e.timestamp)}</span>
+                  ${e.amount ? `<span class="${e.amount < 0 ? "text-rose-600" : "text-blue-700"} font-bold">${e.amount > 0 ? "+" : ""}${money(e.amount)}</span>` : ""}${syncTag(e.id)}
+                </div>`).join("");
+            const statusTag = voided ? `<span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 text-[10px] font-bold">已作廢</span>`
+                : allReturned ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 text-[10px] font-bold">全數退貨</span>` : "";
+            const actions = "";   // 訂單紀錄只供查詢
+            return `
+              <div class="p-3 rounded-xl border ${voided ? "bg-slate-50 border-slate-200 opacity-60" : "bg-white border-slate-200"}">
+                <div class="flex justify-between items-start gap-3">
+                  <div class="min-w-0 space-y-1">
+                    <div class="flex items-center gap-2 text-xs flex-wrap">
+                      <span class="font-mono font-bold text-slate-800 ${voided ? "line-through" : ""}">${o.id}</span>
+                      <span class="text-slate-400">${fmtTime(o.timestamp, ordersScope === "all")}</span>${statusTag}${syncTag(o.id)}
+                    </div>
+                    <p class="text-[11px] text-slate-600 leading-relaxed">${items}${o.couponCount ? `、折價券 ×${o.couponCount}` : ""}</p>
+                    ${events}
+                  </div>
+                  <div class="text-right flex-shrink-0">
+                    <div class="text-sm font-black text-slate-900 ${voided ? "line-through" : ""}">${money(voided ? o.totalAmount : netPaid(o))}</div>
+                    ${!voided && netPaid(o) !== o.totalAmount ? `<div class="text-[11px] text-slate-400">原 ${money(o.totalAmount)}</div>` : ""}
+                    ${actions}
+                  </div>
+                </div>
+              </div>`;
+        }
+
+        function pickupRow(o) {
+            const voided = o.status === "voided";
+            return `
+              <div class="p-3 rounded-xl border ${voided ? "bg-slate-50 border-slate-200 opacity-60" : "bg-amber-50/40 border-amber-200"}">
+                <div class="flex justify-between items-start gap-3">
+                  <div class="min-w-0 space-y-1">
+                    <div class="flex items-center gap-2 text-xs flex-wrap">
+                      <span class="px-1.5 py-0.5 rounded bg-amber-500 text-white text-[10px] font-bold">預購取貨</span>
+                      <span class="font-mono font-bold text-slate-800 ${voided ? "line-through" : ""}">${o.id}</span>
+                      <span class="text-slate-400">${fmtTime(o.timestamp, ordersScope === "all")}</span>
+                      ${voided ? `<span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 text-[10px] font-bold">已取消</span>` : ""}${syncTag(o.id)}
+                    </div>
+                    <p class="text-xs font-bold text-slate-800">${escapeHtml(o.name)}（${escapeHtml(o.last3)}）<span class="font-normal text-slate-400 ml-1">${escapeHtml(o.preorderId)}</span></p>
+                    <p class="text-[11px] text-slate-600">${o.items.map(i => `${escapeHtml(i.name)} ×${i.count}`).join("、")}</p>
+                  </div>
+                  <div class="text-right flex-shrink-0">
+                    <div class="text-sm font-black text-slate-900">${o.totalAmount ? money(o.totalAmount) : `<span class="text-xs text-slate-500 font-semibold">已預付</span>`}</div>
+                    ${!voided && dayKey(o.timestamp) === dayKey() ? `<button onclick="undoPickup('${o.id}')" class="mt-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200">取消取貨</button>` : ""}
+                  </div>
+                </div>
+              </div>`;
+        }
+
+        // ======================= 金額彙總 =======================
+        function summarize(filterFn) {
+            const txs = txLog.filter(t => t.type !== "shift" && filterFn(t));
+            const sum = type => txs.filter(t => t.type === type).reduce((s, t) => s + (Number(t.amount) || 0), 0);
+            const count = type => txs.filter(t => t.type === type).length;
+            return {
+                sales: sum("sale"), refunds: sum("return"), voids: sum("void"), exch: sum("exchange"),
+                pickupCash: sum("pickup") + sum("pickup_void"),
+                net: txs.reduce((s, t) => s + (Number(t.amount) || 0), 0),
+                saleCount: count("sale"), voidCount: count("void"), returnCount: count("return"), exchangeCount: count("exchange"),
+                pickupCount: count("pickup") - count("pickup_void"),
+                returns: txs.filter(t => t.type === "return" || (t.type === "exchange" && t.amount < 0)),
+            };
+        }
+
+        // ======================= 開班 / 交班 / 收攤 =======================
+        function currentShift() {
+            const today = dayKey();
+            const recs = shifts.filter(s => dayKey(s.ts) === today);
+            const last = recs[recs.length - 1];
+            if (!last || last.kind === "close") return null;
+            return {
+                start: last.kind === "open" ? last.periodStart : last.ts,
+                cash: last.counted,
+                by: last.kind === "open" ? last.by : last.next,
+            };
+        }
+        function newPeriodStart() {   // 開班時：從今天最後一次收攤（或今天 00:00）開始算
+            const today = dayKey();
+            const lastClose = [...shifts].reverse().find(s => dayKey(s.ts) === today && s.kind === "close");
+            if (lastClose) return lastClose.ts;
+            const d = new Date(); d.setHours(0, 0, 0, 0);
+            return d.toISOString();
+        }
+
+        function renderShiftBtn() {
+            const btn = document.getElementById("shiftBtn");
+            const cur = currentShift();
+            if (cur) {
+                btn.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100";
+                btn.innerHTML = `<i data-lucide="wallet" class="w-3.5 h-3.5"></i><span>交班</span><span class="font-normal text-emerald-700 max-w-[7rem] truncate">｜${escapeHtml(cur.by || "值班中")}</span>`;
+            } else {
+                btn.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 bg-amber-500 text-white hover:bg-amber-600 animate-pulse";
+                btn.innerHTML = `<i data-lucide="wallet" class="w-3.5 h-3.5"></i><span>開班點收</span>`;
+            }
+            lucide.createIcons();
+        }
+
+        function openShiftModal() {
+            const cur = currentShift();
+            hs = {
+                mode: cur ? "handover" : "open",
+                denoms: Object.fromEntries(DENOMS.map(d => [d, ""])),
+                by: cur ? cur.by || "" : "",
+                next: "", closing: false, confirmNext: false, note: "", submitting: false,
+            };
+            if (cur) {
+                const s = summarize(t => t.timestamp > cur.start);
+                if (s.returns.length) hs.note = s.returns.map(t => `${t.id} 退 ${Math.abs(t.amount)} 元，原因：`).join("\n");
+            }
+            renderShiftModal();
+            openDyn("max-w-4xl");
+        }
+
+        function countedTotal() { return DENOMS.reduce((s, d) => s + d * (Number(hs.denoms[d]) || 0), 0); }
+        function denomTouched() { return DENOMS.some(d => hs.denoms[d] !== ""); }
+        function denomText() { return DENOMS.filter(d => Number(hs.denoms[d]) > 0).map(d => `${d}×${hs.denoms[d]}`).join(", "); }
+
+        function renderShiftModal() {
+            const isOpen = hs.mode === "open";
+            const cur = currentShift();
+            const denomRows = DENOMS.map(d => `
+              <div class="flex items-center gap-2">
+                <span class="w-16 text-right text-sm font-black text-slate-700">${d.toLocaleString()} 元</span>
+                <button onclick="stepDenom(${d},-1)" class="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600"><i data-lucide="minus" class="w-4 h-4"></i></button>
+                <input id="denom_${d}" type="number" inputmode="numeric" min="0" value="${hs.denoms[d]}" placeholder="0" oninput="setDenom(${d}, this.value)"
+                  class="w-16 h-9 text-center bg-white border border-slate-300 rounded-lg font-bold text-base outline-none focus:ring-2 focus:ring-blue-500">
+                <button onclick="stepDenom(${d},1)" class="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600"><i data-lucide="plus" class="w-4 h-4"></i></button>
+                <span class="text-xs text-slate-400">${d >= 100 ? "張" : "枚"}</span>
+                <span id="denomSub_${d}" class="ml-auto text-sm font-bold text-slate-700 tabular-nums">${money(d * (Number(hs.denoms[d]) || 0))}</span>
+              </div>`).join("");
+
+            const left = `
+              <div class="space-y-2">
+                <div class="text-xs font-bold text-slate-700">① 點錢：輸入各面額數量（${isOpen ? "開班零用金" : "錢箱內全部現金"}）</div>
+                <div class="rounded-xl border border-slate-200 p-3 space-y-2 bg-slate-50/60">${denomRows}</div>
+                <div class="flex justify-between items-baseline px-1">
+                  <span class="text-sm font-bold text-slate-700">實點現金合計</span>
+                  <span id="countedTotal" class="text-2xl font-black text-slate-900 tabular-nums">${money(countedTotal())}</span>
+                </div>
+              </div>`;
+
+            let right;
+            if (isOpen) {
+                right = `
+                  <div class="space-y-3">
+                    <div class="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900 leading-relaxed">
+                      今天這台還沒開班。請點收錢箱裡的<strong>零用金</strong>，填上你的名字後開始營業。
+                    </div>
+                    <label class="block">
+                      <span class="text-xs font-bold text-slate-700">② 值班志工姓名</span>
+                      <input value="${escapeHtml(hs.by)}" oninput="hs.by=this.value;updateShiftUI()" placeholder="你的名字" class="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    </label>
+                    <label class="block">
+                      <span class="text-xs font-bold text-slate-700">備註（選填）</span>
+                      <textarea oninput="hs.note=this.value" rows="3" placeholder="例：今日有任何商品狀況都可以填寫，不知道金額為何錯誤就寫不知道~。" class="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">${escapeHtml(hs.note)}</textarea>
+                    </label>
+                  </div>`;
+            } else {
+                const s = summarize(t => t.timestamp > cur.start);
+                const line = (label, val, sub = "") =>
+                    `<div class="flex justify-between py-1"><span class="text-slate-500">${label}${sub ? `<span class="text-[10px] text-slate-400 ml-1">${sub}</span>` : ""}</span><span class="font-bold tabular-nums">${money(val)}</span></div>`;
+                right = `
+                  <div class="space-y-3">
+                    <div class="rounded-xl border border-slate-200 px-3 py-2 text-xs divide-y divide-slate-100">
+                      <div class="flex justify-between py-1"><span class="text-slate-500">本班開始</span><span class="font-bold">${fmtTime(cur.start, true)}</span></div>
+                      ${line("開班現金", cur.cash)}
+                      ${line("銷售", s.sales, `${s.saleCount} 筆`)}
+                      ${s.refunds ? line("退貨退款", s.refunds, `${s.returnCount} 筆`) : ""}
+                      ${s.voids ? line("作廢", s.voids, `${s.voidCount} 筆`) : ""}
+                      ${s.exch ? line("換貨補差", s.exch) : ""}
+                      ${s.pickupCash ? line("預購現場補收", s.pickupCash) : ""}
+                      <div class="flex justify-between py-1.5 text-sm"><span class="font-bold text-slate-800">應有現金</span><span class="font-black text-slate-900 tabular-nums">${money(cur.cash + s.net)}</span></div>
+                    </div>
+                    <div id="matchBox"></div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                      <label class="block">
+                        <span class="text-xs font-bold text-slate-700">② 交班志工</span>
+                        <input value="${escapeHtml(hs.by)}" oninput="hs.by=this.value;updateShiftUI()" placeholder="你的名字" class="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                      </label>
+                      <div>
+                        <span class="text-xs font-bold text-slate-700">③ 接下來</span>
+                        <div class="mt-1 flex bg-slate-100 rounded-lg p-0.5 text-xs font-bold">
+                          <button onclick="hs.closing=false;renderShiftModal()" class="flex-1 py-2 rounded-md ${!hs.closing ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}">有人接班</button>
+                          <button onclick="hs.closing=true;renderShiftModal()" class="flex-1 py-2 rounded-md ${hs.closing ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}">今日收攤</button>
+                        </div>
+                      </div>
+                    </div>
+                    ${hs.closing ? `
+                      <div class="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700">收攤：點完的現金請<strong>交給負責人</strong>。</div>` : `
+                      <div class="rounded-xl border border-slate-200 p-3 space-y-2">
+                        <label class="block">
+                          <span class="text-xs font-bold text-slate-700">接班志工姓名</span>
+                          <input value="${escapeHtml(hs.next)}" oninput="hs.next=this.value;updateShiftUI()" placeholder="接班者的名字" class="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                        </label>
+                        <label class="flex items-start gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                          <input type="checkbox" ${hs.confirmNext ? "checked" : ""} onchange="hs.confirmNext=this.checked;updateShiftUI()" class="w-4 h-4 mt-0.5 accent-emerald-600">
+                          <span id="confirmNextText"></span>
+                        </label>
+                      </div>`}
+                    <label class="block">
+                      <span class="text-xs font-bold text-slate-700">④ 備註 <span id="noteReq" class="text-rose-600"></span></span>
+                      <textarea oninput="hs.note=this.value;updateShiftUI()" rows="3" placeholder="現金短少原因、退貨退款原因、補貨需求、其他狀況…" class="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">${escapeHtml(hs.note)}</textarea>
+                    </label>
+                  </div>`;
+            }
+
+            document.getElementById("dynModalBox").innerHTML = `
+              <div class="px-6 py-4 ${isOpen ? "bg-amber-500" : "bg-emerald-600"} text-white flex justify-between items-center">
+                <div class="flex items-center gap-2"><i data-lucide="wallet" class="w-5 h-5"></i><h3 class="font-bold">${isOpen ? "開班點收" : "交班結算"}</h3>
+                  <span class="text-xs opacity-80">${escapeHtml(deviceName || "")}</span></div>
+                <button onclick="closeDyn()" class="text-white/80 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+              </div>
+              <div class="p-5 overflow-y-auto grid md:grid-cols-2 gap-5">${left}${right}</div>
+              <div class="px-5 pb-5 flex gap-2 items-center">
+                <span id="shiftHint" class="flex-1 text-xs text-rose-600 font-semibold"></span>
+                <button onclick="closeDyn()" class="px-6 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm">取消</button>
+                <button id="shiftSubmit" onclick="submitShift()" class="px-8 py-3 rounded-xl ${isOpen ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700"} disabled:bg-slate-300 text-white font-bold text-sm"></button>
+              </div>`;
+            lucide.createIcons();
+            updateShiftUI();
+        }
+
+        function setDenom(d, v) {
+            hs.denoms[d] = v === "" ? "" : String(Math.max(0, Math.floor(Number(v) || 0)));
+            updateShiftUI();
+        }
+        function stepDenom(d, delta) {
+            const n = Math.max(0, (Number(hs.denoms[d]) || 0) + delta);
+            hs.denoms[d] = String(n);
+            document.getElementById(`denom_${d}`).value = n;
+            updateShiftUI();
+        }
+
+        // 備註是否已填（自動帶入的「原因：」後面要有字）
+        function noteFilled() {
+            const lines = hs.note.split("\n").map(l => l.trim()).filter(Boolean);
+            if (!lines.length) return false;
+            return lines.every(l => !/原因：$/.test(l));
+        }
+
+        function shiftValidation() {
+            const counted = countedTotal();
+            if (hs.mode === "open") {
+                const errs = [];
+                if (!denomTouched()) errs.push("請輸入零用金各面額數量");
+                if (!hs.by.trim()) errs.push("請填值班志工姓名");
+                return { errs, counted };
+            }
+            const cur = currentShift();
+            const s = summarize(t => t.timestamp > cur.start);
+            const expected = cur.cash + s.net;
+            const diff = counted - expected;
+            const errs = [];
+            const needNote = [];
+            if (!denomTouched()) errs.push("請先點錢並輸入各面額數量");
+            if (!hs.by.trim()) errs.push("請填交班志工姓名");
+            if (!hs.closing && !hs.next.trim()) errs.push("請填接班志工姓名");
+            if (!hs.closing && !hs.confirmNext) errs.push("請接班志工確認現金後勾選");
+            if (s.returns.length) needNote.push("本班有退貨退款");
+            if (denomTouched() && diff !== 0) needNote.push("現金不符");
+            if (needNote.length && !noteFilled()) errs.push(`${needNote.join("、")}，請在備註寫明原因`);
+            return { errs, counted, expected, diff, s, needNote, cur };
+        }
+
+        // 只更新數字與按鈕狀態，不重畫整個畫面（避免輸入時跳掉）
+        function updateShiftUI() {
+            if (!hs) return;
+            const v = shiftValidation();
+            DENOMS.forEach(d => { const el = document.getElementById(`denomSub_${d}`); if (el) el.innerText = money(d * (Number(hs.denoms[d]) || 0)); });
+            document.getElementById("countedTotal").innerText = money(v.counted);
+            const ct = document.getElementById("confirmNextText");
+            if (ct) ct.innerText = `接班志工已在場，確認錢箱現金 ${money(v.counted)}（作為下一班的開班現金）`;
+            const mb = document.getElementById("matchBox");
+            if (mb) {
+                mb.innerHTML = !denomTouched() ? `<div class="rounded-xl border-2 border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">輸入點鈔數量後，這裡會顯示是否相符</div>`
+                    : v.diff === 0 ? `<div class="rounded-xl bg-emerald-100 text-emerald-800 px-4 py-3 flex justify-between items-center"><span class="font-black text-lg">相符 ✓</span><span class="text-xs">實點 ${money(v.counted)}</span></div>`
+                        : `<div class="rounded-xl bg-rose-100 text-rose-700 px-4 py-3 flex justify-between items-center"><span class="font-black text-lg">${v.diff < 0 ? "短少" : "多出"} ${money(Math.abs(v.diff))}</span><span class="text-xs">請再點一次，仍不符請寫備註</span></div>`;
+            }
+            const nr = document.getElementById("noteReq");
+            if (nr) nr.innerText = v.needNote && v.needNote.length ? `（必填：${v.needNote.join("、")}）` : "";
+            const btn = document.getElementById("shiftSubmit");
+            btn.disabled = hs.submitting || v.errs.length > 0;
+            btn.innerText = hs.submitting ? "送出中…" : hs.mode === "open" ? `開始營業（零用金 ${money(v.counted)}）` : hs.closing ? "送出收攤" : "送出交班";
+            document.getElementById("shiftHint").innerText = hs.submitting ? "" : (v.errs[0] || "");
+        }
+
+        async function submitShift() {
+            if (!hs || hs.submitting) return;
+            const v = shiftValidation();
+            if (v.errs.length) return;
+            hs.submitting = true;
+            updateShiftUI();
+
+            const ts = new Date().toISOString();
+            const kind = hs.mode === "open" ? "open" : hs.closing ? "close" : "handover";
+            const id = genId("H");
+            const rec = {
+                id, kind, ts, by: hs.by.trim(), next: hs.next.trim(), counted: v.counted,
+                periodStart: kind === "open" ? newPeriodStart() : v.cur.start,
+                note: hs.note.trim(), denoms: denomText()
+            };
+            shifts.push(rec);
+            saveShifts();
+
+            const s = v.s || {};
+            recordTx({
+                id, type: "shift", kind, timestamp: ts, amount: 0, day: dayKey(),
+                periodStart: rec.periodStart, device: deviceName, by: rec.by, next: rec.next,
+                openingCash: kind === "open" ? v.counted : v.cur.cash,
+                sales: s.sales || 0, refunds: s.refunds || 0, voids: s.voids || 0, exch: s.exch || 0, pickupCash: s.pickupCash || 0,
+                net: s.net || 0, expected: kind === "open" ? v.counted : v.expected, counted: v.counted,
+                diff: kind === "open" ? 0 : v.diff, denoms: rec.denoms, note: rec.note
+            });
+            await flushQueue();
+            if (syncPromise) await syncPromise;
+            const ok = isSynced(id);
+            hs.submitting = false;
+            closeDyn();
+            renderShiftBtn();
+            showToast(
+                (kind === "open" ? `開班完成，${rec.by} 值班中` : kind === "close" ? "收攤完成，現金請交給負責人" : `交班完成，接班：${rec.next}`) +
+                (ok ? "" : "（網路恢復後會自動上傳）"));
+        }
+
+        // ======================= 彈窗 =======================
+        function openDyn(width = "max-w-xl") {
+            document.getElementById("dynModalBox").className = `bg-white rounded-2xl w-full ${width} max-h-[92vh] flex flex-col shadow-2xl overflow-hidden`;
+            document.getElementById("dynModal").classList.remove("hidden");
+        }
+        function closeDyn() {
+            if (hs && hs.submitting) return;
+            document.getElementById("dynModal").classList.add("hidden");
+            rx = null; pickupState = null; hs = null; pay = null;
+        }
+        function openSopModal() { document.getElementById("sopModal").classList.remove("hidden"); }
+        function closeSopModal() { document.getElementById("sopModal").classList.add("hidden"); }
+        function openSettingsModal() {
+            document.getElementById("deviceNameInput").value = deviceName;
+            document.getElementById("settingsModal").classList.remove("hidden");
+        }
+        function closeSettingsModal() { document.getElementById("settingsModal").classList.add("hidden"); }
+        function saveSettings() {
+            deviceName = document.getElementById("deviceNameInput").value.trim();
+            store.setStr("pos_device_name", deviceName);
+            closeSettingsModal();
+        }
+    </script>
+</body>
+</html>
