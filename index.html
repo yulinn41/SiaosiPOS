@@ -588,7 +588,7 @@
                 const matchesCategory = activeCategory === "全部" || (p.category || "一般") === activeCategory;
                 const matchesSearch = String(p.name).toLowerCase().includes(searchQuery) || String(p.id).toLowerCase().includes(searchQuery);
                 return matchesCategory && matchesSearch;
-            });
+            }).sort((a, b) => (a.stock <= 0) - (b.stock <= 0)); // 售罄的排到最下面，其餘維持試算表順序
             if (!filtered.length) { grid.innerHTML = emptyState("沒有找到相符商品"); lucide.createIcons(); return; }
 
             grid.innerHTML = filtered.map(p => {
