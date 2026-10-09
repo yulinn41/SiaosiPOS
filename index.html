@@ -66,9 +66,6 @@
             <button id="refreshBtn" onclick="manualRefresh()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition active:scale-95 disabled:opacity-50 disabled:pointer-events-none">
                 <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>重整</span>
             </button>
-            <button onclick="openSettingsModal()" class="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 transition">
-                <i data-lucide="settings" class="w-4 h-4"></i>
-            </button>
         </div>
     </header>
 
@@ -252,23 +249,6 @@
         </div>
     </div>
 
-    <!-- 設定 -->
-    <div id="settingsModal" class="fixed inset-0 bg-slate-900/40 hidden z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4">
-            <div class="flex justify-between items-center">
-                <h3 class="font-bold text-slate-900 text-lg">裝置設定</h3>
-                <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
-            </div>
-            <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1.5">這台裝置名稱</label>
-                <input type="text" id="deviceNameInput" placeholder="例：收銀 A"
-                       class="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-blue-500" />
-                <p class="text-[11px] text-slate-400 mt-1.5">會記錄在交班紀錄，方便分辨是哪一台。</p>
-            </div>
-            <button onclick="saveSettings()" class="w-full py-2.5 bg-blue-600 text-white font-semibold rounded-xl text-sm shadow hover:bg-blue-700 active:scale-95 transition">儲存</button>
-        </div>
-    </div>
-
     <script>
         // ======================= 設定 =======================
         // ★ 把 Apps Script 部署網址貼在引號裡
@@ -276,6 +256,7 @@
 
         const AUTO_REFRESH_MS = 2 * 60 * 1000;   // 每 2 分鐘從試算表更新庫存與預購名單
         const DENOMS = [1000, 500, 100, 50, 10, 5, 1];
+        const STATIONS = ["一樓", "二樓"];        // 收銀位置（每個位置一個錢箱）；開班／交班時選擇
 
         const DEFAULT_PRODUCTS = [
             { id: "P001", name: "壓克力鑰匙圈", price: 129, stock: 119, category: "週邊配件" },
@@ -309,7 +290,9 @@
         let orders = store.get("pos_orders_v2", []);   // 本機的銷售單與取貨單
         let txLog = store.get("pos_tx_v1", []);        // 送往試算表的每一筆異動（含是否已同步）
         let shifts = store.get("pos_shifts_v1", []);   // 本機的開班／交班／收攤紀錄
-        let deviceName = store.getStr("pos_device_name");
+        let remoteTx = store.get("pos_remote_tx_v1", []); // 試算表上今天這台的金流（本機紀錄不見時，交班結算靠它補回）
+        let station = store.getStr("pos_station");       // 這台目前在哪個收銀位置
+        if (station && !STATIONS.includes(station)) station = "";
 
         let cart = [];
         let couponCount = 0;
@@ -459,7 +442,7 @@
         }
 
         function recordTx(tx) {
-            txLog.push({ ...tx, timestamp: tx.timestamp || new Date().toISOString(), synced: false });
+            txLog.push({ station, ...tx, timestamp: tx.timestamp || new Date().toISOString(), synced: false });
             saveTx();
             updateUnsyncedBadge();
             flushQueue();
@@ -524,6 +507,7 @@
                     applyLocalPreorderOverrides();
                     savePreorders();
                 }
+                mergeRemoteShiftData(result);
                 renderCategories();
                 renderProducts();
                 if (!syncPromise) updateSyncStatus(txLog.some(t => !t.synced) ? "有資料待上傳" : "雲端試算表已連線", "bg-emerald-500");
@@ -533,6 +517,32 @@
             } finally {
                 fetching = false;
                 document.getElementById("refreshBtn").disabled = false;
+            }
+        }
+
+        // 把試算表上「今天、這台裝置」的交班紀錄與金流接回本機。
+        // 換瀏覽器、瀏覽器資料被清掉、分頁被系統重新載入後，原本開的班不會不見。
+        function mergeRemoteShiftData(result) {
+            if (hs) return;                                           // 交班視窗開著時不動，下次更新再接
+            if (result.today && result.today !== dayKey()) return;    // 裝置日期和試算表不同就不接
+            // 今天的紀錄全部接回，一樓、二樓各自一組（依收銀位置分開算）
+            const st = x => (STATIONS.includes(x.station) ? x.station : "");
+            if (Array.isArray(result.txs)) {
+                remoteTx = result.txs.map(x => ({ ...x, station: st(x) }));
+                store.set("pos_remote_tx_v1", remoteTx);
+            }
+            if (Array.isArray(result.shifts)) {
+                let added = 0;
+                result.shifts.forEach(r => {
+                    if (!r.id || !r.ts || shifts.some(s => s.id === r.id)) return;
+                    shifts.push({ id: r.id, kind: r.kind, ts: r.ts, station: st(r), by: r.by || "", next: r.next || "", counted: Number(r.counted) || 0, note: r.note || "", denoms: r.denoms || "", restored: true });
+                    added++;
+                });
+                if (added) {
+                    shifts.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+                    saveShifts();
+                    renderShiftBtn();
+                }
             }
         }
 
@@ -1275,7 +1285,7 @@
                 ? list.map(o => o.type === "pickup" ? pickupRow(o) : saleRow(o)).join("")
                 : `<p class="text-center text-sm text-slate-400 py-12">${q ? "找不到相符的訂單" : "還沒有訂單"}</p>`;
             const day = summarize(t => dayKey(t.timestamp) === today);
-            document.getElementById("ordersSummary").innerText = `今天（本機）：銷售 ${day.saleCount} 筆・淨收 ${money(day.net)}・預購取貨 ${day.pickupCount} 筆`;
+            document.getElementById("ordersSummary").innerText = `今天（${station || "本機"}）：銷售 ${day.saleCount} 筆・淨收 ${money(day.net)}・預購取貨 ${day.pickupCount} 筆`;
             lucide.createIcons();
         }
 
@@ -1346,7 +1356,12 @@
 
         // ======================= 金額彙總 =======================
         function summarize(filterFn) {
-            const txs = txLog.filter(t => t.type !== "shift" && filterFn(t));
+            // 本機紀錄為主；本機沒有、但試算表上有的（同一台今天的單）也算進來
+            // 只算目前這個收銀位置的錢箱。本機還沒選位置時結的單，算在這台目前的位置。
+            const localIds = new Set(txLog.map(t => t.id));
+            const txs = txLog.filter(t => (t.station || station) === station)
+                .concat(remoteTx.filter(t => !localIds.has(t.id) && (t.station || "") === station))
+                .filter(t => t.type !== "shift" && filterFn(t));
             const sum = type => txs.filter(t => t.type === type).reduce((s, t) => s + (Number(t.amount) || 0), 0);
             const count = type => txs.filter(t => t.type === type).length;
             return {
@@ -1360,20 +1375,31 @@
         }
 
         // ======================= 開班 / 交班 / 收攤 =======================
-        function currentShift() {
+        function currentShift(st = station) {
             const today = dayKey();
-            const recs = shifts.filter(s => dayKey(s.ts) === today);
+            const recs = shifts.filter(s => dayKey(s.ts) === today && (s.station || "") === st);
             const last = recs[recs.length - 1];
             if (!last || last.kind === "close") return null;
             return {
-                start: last.kind === "open" ? last.periodStart : last.ts,
+                // start：金額從哪個時間點開始算（開班那一班會把開班前的單也算進來）
+                start: last.kind === "open" ? (last.periodStart || periodStartFor(last)) : last.ts,
+                // since：這一班實際接手的時間（畫面與試算表「本班開始」顯示這個）
+                since: last.ts,
                 cash: last.counted,
                 by: last.kind === "open" ? last.by : last.next,
             };
         }
+        // 開班那一班的計算起點：當天在它之前最後一次收攤，沒有就是當天 00:00
+        function periodStartFor(rec) {
+            const day = dayKey(rec.ts);
+            const prevClose = [...shifts].reverse().find(s => s.kind === "close" && (s.station || "") === (rec.station || "") && dayKey(s.ts) === day && s.ts < rec.ts);
+            if (prevClose) return prevClose.ts;
+            const d = new Date(rec.ts); d.setHours(0, 0, 0, 0);
+            return d.toISOString();
+        }
         function newPeriodStart() {   // 開班時：從今天最後一次收攤（或今天 00:00）開始算
             const today = dayKey();
-            const lastClose = [...shifts].reverse().find(s => dayKey(s.ts) === today && s.kind === "close");
+            const lastClose = [...shifts].reverse().find(s => dayKey(s.ts) === today && s.kind === "close" && (s.station || "") === station);
             if (lastClose) return lastClose.ts;
             const d = new Date(); d.setHours(0, 0, 0, 0);
             return d.toISOString();
@@ -1384,10 +1410,10 @@
             const cur = currentShift();
             if (cur) {
                 btn.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100";
-                btn.innerHTML = `<i data-lucide="wallet" class="w-3.5 h-3.5"></i><span>交班</span><span class="font-normal text-emerald-700 max-w-[7rem] truncate">｜${escapeHtml(cur.by || "值班中")}</span>`;
+                btn.innerHTML = `<i data-lucide="wallet" class="w-3.5 h-3.5"></i><span>交班</span><span class="font-normal text-emerald-700 max-w-[9rem] truncate">｜${station ? escapeHtml(station) + "・" : ""}${escapeHtml(cur.by || "值班中")}</span>`;
             } else {
                 btn.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 bg-amber-500 text-white hover:bg-amber-600 animate-pulse";
-                btn.innerHTML = `<i data-lucide="wallet" class="w-3.5 h-3.5"></i><span>開班點收</span>`;
+                btn.innerHTML = `<i data-lucide="wallet" class="w-3.5 h-3.5"></i><span>開班點收</span>${station ? `<span class="font-normal">｜${escapeHtml(station)}</span>` : ""}`;
             }
             lucide.createIcons();
         }
@@ -1406,6 +1432,29 @@
             }
             renderShiftModal();
             openDyn("max-w-4xl");
+        }
+
+        // 選收銀位置：這台之後結的單、交班結算都算在這個位置的錢箱
+        function setStation(st) {
+            if (hs && hs.submitting) return;
+            station = st;
+            store.setStr("pos_station", station);
+            renderShiftBtn();
+            openShiftModal();   // 依這個位置今天的狀態，重新顯示「開班」或「交班」
+        }
+        function stationPicker() {
+            const btns = STATIONS.map(st => {
+                const c = currentShift(st);
+                const on = st === station;
+                return `<button onclick="setStation('${st}')" class="flex-1 py-2 px-2 rounded-lg border-2 text-left transition ${on ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"}">
+                    <div class="text-sm font-black">${escapeHtml(st)}</div>
+                    <div class="text-[11px] ${on ? "text-slate-300" : "text-slate-400"} truncate">${c ? `${escapeHtml(c.by || "值班中")}・${fmtTime(c.since)} 起` : "今天尚未開班"}</div>
+                  </button>`;
+            }).join("");
+            return `<div>
+                <span class="text-xs font-bold text-slate-700">收銀位置${station ? "" : ` <span class="text-rose-600">（請選擇）</span>`}</span>
+                <div class="mt-1 flex gap-2">${btns}</div>
+              </div>`;
         }
 
         function countedTotal() { return DENOMS.reduce((s, d) => s + d * (Number(hs.denoms[d]) || 0), 0); }
@@ -1440,8 +1489,9 @@
             if (isOpen) {
                 right = `
                   <div class="space-y-3">
+                    ${stationPicker()}
                     <div class="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900 leading-relaxed">
-                      今天這台還沒開班。請點收錢箱裡的<strong>零用金</strong>，填上你的名字後開始營業。
+                      ${station ? `<strong>${escapeHtml(station)}</strong>今天還沒開班。` : "先選這台在一樓還是二樓收銀。"}請點收錢箱裡的<strong>零用金</strong>，填上你的名字後開始營業。
                     </div>
                     <label class="block">
                       <span class="text-xs font-bold text-slate-700">② 值班志工姓名</span>
@@ -1458,8 +1508,9 @@
                     `<div class="flex justify-between py-1"><span class="text-slate-500">${label}${sub ? `<span class="text-[10px] text-slate-400 ml-1">${sub}</span>` : ""}</span><span class="font-bold tabular-nums">${money(val)}</span></div>`;
                 right = `
                   <div class="space-y-3">
+                    ${stationPicker()}
                     <div class="rounded-xl border border-slate-200 px-3 py-2 text-xs divide-y divide-slate-100">
-                      <div class="flex justify-between py-1"><span class="text-slate-500">本班開始</span><span class="font-bold">${fmtTime(cur.start, true)}</span></div>
+                      <div class="flex justify-between py-1"><span class="text-slate-500">本班開始</span><span class="font-bold">${fmtTime(cur.since, true)}</span></div>
                       ${line("開班現金", cur.cash)}
                       ${line("銷售", s.sales, `${s.saleCount} 筆`)}
                       ${s.refunds ? line("退貨退款", s.refunds, `${s.returnCount} 筆`) : ""}
@@ -1505,7 +1556,7 @@
             document.getElementById("dynModalBox").innerHTML = `
               <div class="px-6 py-4 ${isOpen ? "bg-amber-500" : "bg-emerald-600"} text-white flex justify-between items-center">
                 <div class="flex items-center gap-2"><i data-lucide="wallet" class="w-5 h-5"></i><h3 class="font-bold">${isOpen ? "開班點收" : "交班結算"}</h3>
-                  <span class="text-xs opacity-80">${escapeHtml(deviceName || "")}</span></div>
+                  <span class="text-xs opacity-80">${escapeHtml(station)}</span></div>
                 <button onclick="closeDyn()" class="text-white/80 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
               </div>
               <div class="p-5 overflow-y-auto grid md:grid-cols-2 gap-5">${left}${right}</div>
@@ -1540,6 +1591,7 @@
             const counted = countedTotal();
             if (hs.mode === "open") {
                 const errs = [];
+                if (!station) errs.push("請先選擇收銀位置");
                 if (!denomTouched()) errs.push("請輸入零用金各面額數量");
                 if (!hs.by.trim()) errs.push("請填值班志工姓名");
                 return { errs, counted };
@@ -1593,7 +1645,7 @@
             const kind = hs.mode === "open" ? "open" : hs.closing ? "close" : "handover";
             const id = genId("H");
             const rec = {
-                id, kind, ts, by: hs.by.trim(), next: hs.next.trim(), counted: v.counted,
+                id, kind, ts, station, by: hs.by.trim(), next: hs.next.trim(), counted: v.counted,
                 periodStart: kind === "open" ? newPeriodStart() : v.cur.start,
                 note: hs.note.trim(), denoms: denomText()
             };
@@ -1603,7 +1655,8 @@
             const s = v.s || {};
             recordTx({
                 id, type: "shift", kind, timestamp: ts, amount: 0, day: dayKey(),
-                periodStart: rec.periodStart, device: deviceName, by: rec.by, next: rec.next,
+                periodStart: rec.periodStart, shiftStart: kind === "open" ? ts : v.cur.since,
+                station, by: rec.by, next: rec.next,
                 openingCash: kind === "open" ? v.counted : v.cur.cash,
                 sales: s.sales || 0, refunds: s.refunds || 0, voids: s.voids || 0, exch: s.exch || 0, pickupCash: s.pickupCash || 0,
                 net: s.net || 0, expected: kind === "open" ? v.counted : v.expected, counted: v.counted,
@@ -1616,7 +1669,7 @@
             closeDyn();
             renderShiftBtn();
             showToast(
-                (kind === "open" ? `開班完成，${rec.by} 值班中` : kind === "close" ? "收攤完成，現金請交給負責人" : `交班完成，接班：${rec.next}`) +
+                (station ? `${station}｜` : "") + (kind === "open" ? `開班完成，${rec.by} 值班中` : kind === "close" ? "收攤完成，現金請交給負責人" : `交班完成，接班：${rec.next}`) +
                 (ok ? "" : "（網路恢復後會自動上傳）"));
         }
 
@@ -1632,16 +1685,6 @@
         }
         function openSopModal() { document.getElementById("sopModal").classList.remove("hidden"); }
         function closeSopModal() { document.getElementById("sopModal").classList.add("hidden"); }
-        function openSettingsModal() {
-            document.getElementById("deviceNameInput").value = deviceName;
-            document.getElementById("settingsModal").classList.remove("hidden");
-        }
-        function closeSettingsModal() { document.getElementById("settingsModal").classList.add("hidden"); }
-        function saveSettings() {
-            deviceName = document.getElementById("deviceNameInput").value.trim();
-            store.setStr("pos_device_name", deviceName);
-            closeSettingsModal();
-        }
     </script>
 </body>
 </html>
