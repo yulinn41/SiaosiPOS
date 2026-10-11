@@ -256,7 +256,11 @@
 
         const AUTO_REFRESH_MS = 2 * 60 * 1000;   // 每 2 分鐘從試算表更新庫存與預購名單
         const DENOMS = [1000, 500, 100, 50, 10, 5, 1];
-        const STATIONS = ["一樓", "二樓"];        // 收銀位置（每個位置一個錢箱）；開班／交班時選擇
+        // 換日時間：凌晨這個時間以前都算「前一天」的營業日（收攤拖過午夜、半夜補登都會算在前一天）。
+        // ★ 要和 Apps Script 最上面 CONFIG 的 DAY_CUTOFF_HOUR 一樣。
+        const DAY_CUTOFF_HOUR = 5;
+        const STATIONS = ["一樓", "二樓"];
+        const NEED_BACKEND = 5;                   // 這份網頁需要的 Apps Script 版本（Apps Script 裡的 BACKEND_VERSION）        // 收銀位置（每個位置一個錢箱）；開班／交班時選擇
 
         const DEFAULT_PRODUCTS = [
             { id: "P001", name: "壓克力鑰匙圈", price: 129, stock: 119, category: "週邊配件" },
@@ -279,10 +283,35 @@
 
         const store = {
             get(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch (e) { return fallback; } },
-            set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { console.warn("儲存失敗", e); } },
+            set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { console.warn("儲存失敗", e); storageOk = false; showWarnings(); } },
             getStr(key) { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } },
             setStr(key, val) { try { localStorage.setItem(key, val); } catch (e) {} },
         };
+
+        // 這個瀏覽器能不能把資料留在本機（無痕模式、被封鎖時不行）
+        let storageOk = true;
+        try { localStorage.setItem("pos_probe", "1"); storageOk = localStorage.getItem("pos_probe") === "1"; } catch (e) { storageOk = false; }
+        try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}   // 請瀏覽器不要自動清掉這個網站的資料
+        let backendVersion = null;   // 試算表後端回報的版本；null＝還沒連上
+
+        // 畫面最上方的警告列：後端是舊版、瀏覽器不保存資料
+        function showWarnings() {
+            if (!document.body) return;
+            let bar = document.getElementById("warnBar");
+            if (!bar) {
+                bar = document.createElement("div");
+                bar.id = "warnBar";
+                bar.className = "bg-rose-600 text-white text-xs font-bold px-4 py-2 leading-relaxed flex-shrink-0";
+                document.body.insertBefore(bar, document.body.firstChild);
+            }
+            const msgs = [];
+            if (backendVersion !== null && !(backendVersion >= NEED_BACKEND))
+                msgs.push("⚠ 試算表的 Apps Script 還是舊版：開班狀態與訂單紀錄在重新整理後無法接回。請到 Apps Script「部署 → 管理部署作業 → 編輯（鉛筆）→ 版本選『新版本』→ 部署」。");
+            if (!storageOk)
+                msgs.push("⚠ 這個瀏覽器沒有把資料存在本機（可能是無痕模式或儲存空間被封鎖）。已上傳的資料不受影響，但請勿在離線時結帳。");
+            bar.innerHTML = msgs.map(m => `<div>${m}</div>`).join("");
+            bar.style.display = msgs.length ? "" : "none";
+        }
 
         const apiUrl = API_URL.trim();
         let products = store.get("pos_products_v2", DEFAULT_PRODUCTS).map(normalizeProduct);
@@ -314,6 +343,7 @@
             renderCart();
             renderShiftBtn();
             updateUnsyncedBadge();
+            showWarnings();
             if (apiUrl) {
                 fetchSheetData();
                 flushQueue();
@@ -337,7 +367,14 @@
         function escapeHtml(str) {
             return String(str ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
         }
-        function dayKey(d = new Date()) { return new Date(d).toLocaleDateString("sv-SE"); } // YYYY-MM-DD（本地時區）
+        // 營業日 YYYY-MM-DD（本地時區）；凌晨 DAY_CUTOFF_HOUR 點以前算前一天
+        function dayKey(d = new Date()) { return new Date(new Date(d).getTime() - DAY_CUTOFF_HOUR * 3600000).toLocaleDateString("sv-SE"); }
+        // 某個時間點所屬營業日的開始時間（例：換日 5 點 → 當天 05:00）
+        function dayStart(d = new Date()) {
+            const x = new Date(new Date(d).getTime() - DAY_CUTOFF_HOUR * 3600000);
+            x.setHours(0, 0, 0, 0);
+            return new Date(x.getTime() + DAY_CUTOFF_HOUR * 3600000).toISOString();
+        }
         function fmtTime(ts, withDate = false) {
             const o = withDate ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false } : { hour: "2-digit", minute: "2-digit", hour12: false };
             return new Date(ts).toLocaleString("zh-TW", o);
@@ -442,7 +479,13 @@
         }
 
         function recordTx(tx) {
-            txLog.push({ station, ...tx, timestamp: tx.timestamp || new Date().toISOString(), synced: false });
+            const entry = { station, ...tx, timestamp: tx.timestamp || new Date().toISOString(), synced: false };
+            // 把這筆異動對應的那張訂單（最新內容）一起送到試算表備份，本機資料不見時可以接回訂單紀錄
+            if (tx.type !== "shift") {
+                const o = orders.find(x => x.id === (tx.orderId || tx.id)) || orders.find(x => x.id === tx.refId);
+                if (o) { o.u = entry.timestamp; o.station = o.station || station; saveOrders(); entry.snap = JSON.parse(JSON.stringify(o)); }
+            }
+            txLog.push(entry);
             saveTx();
             updateUnsyncedBadge();
             flushQueue();
@@ -462,6 +505,7 @@
                     const ok = await postToSheet({ action: "tx", tx: payloadTx });
                     if (!ok) { failed = true; break; }
                     t.synced = true;
+                    delete t.snap;   // 已上傳，本機不用再留一份
                     saveTx();
                     updateUnsyncedBadge();
                 }
@@ -493,6 +537,8 @@
                 const res = await fetch(apiUrl + (apiUrl.includes("?") ? "&" : "?") + "t=" + Date.now());
                 const result = await res.json();
                 if (result.status !== "success") throw new Error(result.message || "格式不符");
+                backendVersion = Number(result.version) || 0;
+                showWarnings();
                 if (Array.isArray(result.data) && result.data.length) {
                     products = result.data.map(normalizeProduct);
                     // 尚未上傳的異動先套用到本機庫存，避免畫面數字被舊資料蓋掉
@@ -508,6 +554,7 @@
                     savePreorders();
                 }
                 mergeRemoteShiftData(result);
+                mergeRemoteOrders(result);
                 renderCategories();
                 renderProducts();
                 if (!syncPromise) updateSyncStatus(txLog.some(t => !t.synced) ? "有資料待上傳" : "雲端試算表已連線", "bg-emerald-500");
@@ -517,6 +564,23 @@
             } finally {
                 fetching = false;
                 document.getElementById("refreshBtn").disabled = false;
+            }
+        }
+
+        // 把試算表備份的訂單接回本機的「訂單紀錄」（本機沒有的補上；試算表上比較新的就換成新的）
+        function mergeRemoteOrders(result) {
+            if (!Array.isArray(result.orders) || rx || pickupState || hs) return;
+            let changed = 0;
+            result.orders.forEach(r => {
+                if (!r || !r.id || !r.timestamp) return;
+                const i = orders.findIndex(o => o.id === r.id);
+                if (i < 0) { orders.push(r); changed++; }
+                else if ((r.u || "") > (orders[i].u || "")) { orders[i] = r; changed++; }
+            });
+            if (changed) {
+                orders.sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0));
+                saveOrders();
+                refreshOrdersIfOpen();
             }
         }
 
@@ -541,6 +605,15 @@
                 if (added) {
                     shifts.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
                     saveShifts();
+                    renderShiftBtn();
+                }
+            }
+            // 這台還沒選收銀位置（例如本機資料被清掉）：今天只有一個位置正在值班時，直接接回那個位置
+            if (!station) {
+                const open = STATIONS.filter(x => currentShift(x));
+                if (open.length === 1) {
+                    station = open[0];
+                    store.setStr("pos_station", station);
                     renderShiftBtn();
                 }
             }
@@ -1257,7 +1330,7 @@
                 if (o.totalAmount) p.payStatus = "未付款";
                 savePreorders();
             }
-            recordTx({ id, type: "pickup_void", refId: o.preorderId, amount: -o.totalAmount, desc: `取消取貨 ${o.id}：${o.name}`, note: "", items: o.items });
+            recordTx({ id, type: "pickup_void", orderId: o.id, refId: o.preorderId, amount: -o.totalAmount, desc: `取消取貨 ${o.id}：${o.name}`, note: "", items: o.items });
             renderCategories();
             renderProducts();
             refreshOrdersIfOpen();
@@ -1389,20 +1462,18 @@
                 by: last.kind === "open" ? last.by : last.next,
             };
         }
-        // 開班那一班的計算起點：當天在它之前最後一次收攤，沒有就是當天 00:00
+        // 開班那一班的計算起點：當天在它之前最後一次收攤，沒有就是當天營業日的開始
         function periodStartFor(rec) {
             const day = dayKey(rec.ts);
             const prevClose = [...shifts].reverse().find(s => s.kind === "close" && (s.station || "") === (rec.station || "") && dayKey(s.ts) === day && s.ts < rec.ts);
             if (prevClose) return prevClose.ts;
-            const d = new Date(rec.ts); d.setHours(0, 0, 0, 0);
-            return d.toISOString();
+            return dayStart(rec.ts);
         }
-        function newPeriodStart() {   // 開班時：從今天最後一次收攤（或今天 00:00）開始算
+        function newPeriodStart() {   // 開班時：從今天最後一次收攤（或今天營業日的開始）開始算
             const today = dayKey();
             const lastClose = [...shifts].reverse().find(s => dayKey(s.ts) === today && s.kind === "close" && (s.station || "") === station);
             if (lastClose) return lastClose.ts;
-            const d = new Date(); d.setHours(0, 0, 0, 0);
-            return d.toISOString();
+            return dayStart();
         }
 
         function renderShiftBtn() {
